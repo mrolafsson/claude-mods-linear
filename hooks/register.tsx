@@ -897,10 +897,12 @@ export const register: Register = on => {
       )
     }
     const other = which === 'issues' ? 'Projects' : 'Issues'
+    // On the bar, what Enter does comes first, naming the tab it lands on.
+    const here = which === 'issues' ? 'Issues' : 'Projects'
     const hint = onBar
       ? chosen === which
-        ? `↑ to ${other} · ↓ back to the list`
-        : `Enter opens ${other} · ↑ to stay · ↓ back to the list`
+        ? `Enter stays on ${here} · ↑ to ${other} · ↓ back to the list`
+        : `Enter opens ${other} · ↑ back to ${here} · ↓ back to the list`
       : sel === 0 && !sc
         ? `Type to filter · ↓ to choose · ↑ to the tabs · Enter to open · Esc clears`
         : sc
@@ -912,13 +914,13 @@ export const register: Register = on => {
     // The same, for a narrow pane, where the long one would wrap.
     const shortHint = onBar
       ? chosen === which
-        ? `↑ ${other} · ↓ list`
-        : `↵ ${other} · ↓ list`
+        ? `↵ ${here} · ↑ ${other}`
+        : `↵ ${other} · ↑ ${here}`
       : sel === 0 && !sc
-        ? 'Filter · ↑ tabs'
+        ? 'Type to filter… · ↑ tabs'
         : sc
-          ? 'Filter · ↵ open · Esc back'
-          : 'Filter · ↑↓ · ↵ open'
+          ? 'Type to filter… · Esc back'
+          : 'Type to filter… · ↑↓ · ↵'
 
     return (
       <Box flexDirection="column" gap={1}>
