@@ -909,6 +909,17 @@ export const register: Register = on => {
           ? 'Type to filter · ↑↓ to choose · Enter for its issues · Esc clears'
           : 'Type to filter · ↑↓ to choose · Enter to open · Esc clears'
 
+    // The same, for a narrow pane, where the long one would wrap.
+    const shortHint = onBar
+      ? chosen === which
+        ? `↑ ${other} · ↓ list`
+        : `↵ ${other} · ↓ list`
+      : sel === 0 && !sc
+        ? 'Filter · ↑ tabs'
+        : sc
+          ? 'Filter · ↵ open · Esc back'
+          : 'Filter · ↑↓ · ↵ open'
+
     return (
       <Box flexDirection="column" gap={1}>
         {sc ? (
@@ -959,7 +970,7 @@ export const register: Register = on => {
             // Short, so the field never wraps and moves the list as it takes
             // the keyboard: the Enter hint a glyph, the hint itself when wide.
             submitLabel="↵"
-            placeholder={width >= 70 ? hint : 'Filter…'}
+            placeholder={width >= 70 ? hint : shortHint}
             value={f}
             onInput={async text => {
               await update($, filter, () => text)
