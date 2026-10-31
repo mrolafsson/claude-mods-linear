@@ -266,6 +266,16 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   expect(await ui.find({ type: 'Text', text: /^Offline Sync$/ })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'tab-issues' })).toBeUndefined()
 
+  // An issue opened from the project says where it was opened from.
+  await ui.press({ key: 'issue-HAL-250' })
+  await settle()
+  expect(await ui.find({ type: 'Text', text: 'Projects › Offline Sync ›' })).toBeDefined()
+  await ui.press({ key: 'back' })
+  await settle()
+  await ui.unmount()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await options(ui)).toEqual(['issue-HAL-250'])
+
   // Its crumb (as Esc does) back to the projects, on that project.
   await ui.press({ key: 'crumb-projects' })
   await settle()

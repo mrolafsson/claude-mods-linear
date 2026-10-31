@@ -542,7 +542,7 @@ async function back($: EngineInterface, from: string | null) {
   const at = from ? rowsOf(await currentLines($)).findIndex(l => l.kind === 'issue' && l.issue.id === from) : -1
   await update($, selected, () => Math.max(0, at))
   // The keyboard back in the list, on the row it came from.
-  await focusOn($, at >= 0 ? 'rows' : 'filter')
+  await focusOn($, at >= 0 && from ? `issue-${from}` : 'filter')
 }
 
 async function signOut($: EngineInterface, key: string) {
@@ -743,7 +743,7 @@ export const register: Register = on => {
       const stateColor = hex(d?.statusColor) ?? s.color
       const priority = i.priority === 1 ? null : d?.priorityLabel || PRIORITY[i.priority] || null
       const inProject = await read($, scope)
-      const crumb = inProject ? `${inProject.name} ›` : 'Issues ›'
+      const crumb = inProject ? `Projects › ${cut(inProject.name, 30)} ›` : 'Issues ›'
       const options = v.picking ? (await read($, statuses))[i.team] : undefined
       // Start hands the issue to a cloud session of this session's repository.
       const repo = await $.session.repo()
@@ -871,16 +871,19 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1}>
         {sc ? (
+          // A project's screen, topped as an issue's is: back, the crumb, its
+          // name; then its state as a pill in its colour, and the rest.
           <Box flexDirection="column">
             <Box flexDirection="row" gap={1}>
-              <Button key="crumb-projects" plain dimColor label="Projects ›" onPress={() => leaveProject($)} />
+              {pill({ id: 'crumb-projects', hotkey: 'b', label: 'back', color: 'subtle', onPress: () => leaveProject($) })}
+              <Text dimColor>Projects ›</Text>
               <Text weight="bold" wrap="truncate-end">{sc.name}</Text>
               <Text dimColor>{isLoading ? ' loading…' : ''}</Text>
             </Box>
             {project && (
               <Box flexDirection="row" gap={1} flexWrap="wrap">
-                <Text color={look(project.state === 'planned' ? 'unstarted' : project.state, project.state).color}>
-                  {project.state[0]!.toUpperCase() + project.state.slice(1)}
+                <Text backgroundColor={look(project.state === 'planned' ? 'unstarted' : project.state, project.state).color} color="inverseText" weight="semibold">
+                  {` ${project.state[0]!.toUpperCase() + project.state.slice(1)} `}
                 </Text>
                 <Text dimColor>· {Math.round(project.progress * 100)}%{project.lead ? ` · ${project.lead}` : ''}{project.targetDate ? ` · due ${project.targetDate}` : ''} ·</Text>
                 <Link href={project.url} label="open in Linear" />
