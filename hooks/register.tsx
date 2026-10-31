@@ -645,11 +645,12 @@ export const register: Register = on => {
         await switchTab($, element === 'tab-issues' ? 'issues' : 'projects')
         return { deny: 'The cursor stays in the filter; the tab changed.' }
       }
-      // The arrows move to the element above or below on screen, so a move
-      // off the filter onto anything drawn below it (a row, a notice's
-      // buttons) is ↓, and onto anything above it (the tabs, the workspaces,
-      // a project's crumb) is ↑.
-      const down = Boolean(element && (element.startsWith('issue-') || element.startsWith('project-') || element === 'copy-link' || element === 'dismiss'))
+      // The arrows move the ring to the nearest element above or below on
+      // screen. The filter is framed by a rule on the line above and the
+      // line below it, nearer than anything else, so ↑ lands on the top one
+      // and ↓ on the bottom one. (Rows, a notice's buttons below and the
+      // tabs above count too, should one ever be nearer.)
+      const down = element === 'gate-down' || Boolean(element && (element.startsWith('issue-') || element.startsWith('project-') || element === 'copy-link' || element === 'dismiss'))
       const count = rowsOf(await currentLines($)).length
       const sel = await read($, selected)
       // Above the first row is the tab bar: -1 with the open tab chosen, -2
@@ -863,8 +864,8 @@ export const register: Register = on => {
     const isLoading = showsProjects ? Boolean(proj?.isLoading) : Boolean(source?.isLoading)
     const error = showsProjects ? proj?.error : source?.error
     // What's left of the pane once the header, filter and notes are drawn:
-    // about 12 lines (the header may wrap), a note or an error two more.
-    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 12 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
+    // about 14 lines (the header may wrap; the filter's rules take two), a note or an error two more.
+    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 14 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
     // The highlighted row (-1: the tab bar), and the window of lines around it.
     const sel = Math.max(sc ? 0 : -2, Math.min(await read($, selected), rows.length - 1))
     const picked = sel >= 0 ? rows[sel] : undefined
@@ -970,6 +971,8 @@ export const register: Register = on => {
         </Box>
         )}
         {Input && (
+          <Box flexDirection="column">
+          <Button key="gate-up" plain dimColor label={'─'.repeat(Math.max(10, width - 2))} onPress={() => undefined} />
           <Input
             key="filter"
             autoFocus
@@ -984,6 +987,8 @@ export const register: Register = on => {
             }}
             onSubmit={() => (onBar ? (chosen === which ? update($, selected, () => 0) : switchTab($, chosen)) : open(picked))}
           />
+          <Button key="gate-down" plain dimColor label={'─'.repeat(Math.max(10, width - 2))} onPress={() => undefined} />
+          </Box>
         )}
         {noticeRow}
         {error && <Text color="error" wrap="wrap">{error}</Text>}
