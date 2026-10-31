@@ -12,6 +12,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { DEMO, demoGql } from './demo'
 import type { Detail, Issue, Loaded, Notice, Project, ProjectsLoaded, Scope, SignIn, Status, View, Workspace } from '../types'
 
 const PANE = 'linear'
@@ -238,6 +239,8 @@ async function gqlWith($: EngineInterface, a: Account, query: string, variables:
 }
 
 async function gql($: EngineInterface, key: string, query: string, variables: Record<string, unknown> = {}) {
+  // The demo workspace answers from memory: no sign-in, no network.
+  if (key === DEMO) return demoGql(query, variables)
   let a = await account($, key)
   if (a.expiresAt - 60_000 < Date.now()) a = await refreshed($, a)
   return gqlWith($, a, query, variables)
@@ -312,7 +315,7 @@ async function load($: EngineInterface, key: string) {
     )
     const issues: Issue[] = d.viewer.assignedIssues.nodes.map(toIssue)
     await update($, loaded, all => ({ ...all, [key]: { issues, at: Date.now(), error: null, isLoading: false } }))
-    await $.store.set(`issues:${key}`, issues)
+    if (key !== DEMO) await $.store.set(`issues:${key}`, issues)
   } catch (err) {
     await update($, loaded, all => ({ ...all, [key]: { ...(all[key] ?? { issues: [], at: 0 }), error: message(err), isLoading: false } }))
   }
@@ -407,6 +410,19 @@ const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
 async function start($: EngineInterface, key: string, d: Detail) {
   const cwd = await $.session.cwd()
   const repo = await $.session.repo()
+  if (key === DEMO) {
+    // The demo makes it yours and In Progress, and says what would follow.
+    const states = await teamStates($, key, d.team)
+    const started = states.find(s => s.type === 'started')
+    await gql($, key, `mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`, {
+      id: d.id,
+      input: { assigneeId: 'me', ...(started && d.statusType !== 'started' ? { stateId: started.id } : {}) },
+    })
+    await say($, `Demo: ${d.id} is yours and In Progress. Out of the demo, a Claude Code cloud session would now start on it${repo?.remote ? ' from this repository' : ''}.`)
+    await openIssue($, key, d.id)
+    void load($, key)
+    return
+  }
   if (!repo?.remote) {
     await say($, `Start needs a git repository with a GitHub remote: open Claude in ${d.id}'s repository first.`, null, true)
     return
@@ -564,16 +580,25 @@ async function signOut($: EngineInterface, key: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'linear', description: 'Your Linear issues in a pane: read, change status, start in the cloud' })
+    await $.command.register({
+      name: 'linear',
+      description: 'Your Linear issues in a pane: read, change status, start in the cloud (`/linear demo` for a made-up workspace)',
+    })
     return next(e)
   })
 
-  on('command.run', { command: 'linear' }, async $ => {
+  on('command.run', { command: 'linear' }, async ($, e) => {
     // A notice is for the moment it's given: none from an earlier opening.
     await update($, notice, () => null)
     const list = ((await $.store.get('workspaces')) as Workspace[] | undefined) ?? []
     await update($, workspaces, () => list)
-    if (list.length === 0) {
+    if (e.args.trim() === DEMO) {
+      // `/linear demo`: the made-up workspace, no account needed.
+      await update($, workspace, () => DEMO)
+      await update($, scope, () => null)
+      await update($, view, (): View => ({ screen: 'list' }))
+      await load($, DEMO)
+    } else if (list.length === 0) {
       await beginSignIn($)
     } else {
       const chosen = await read($, workspace)
@@ -987,7 +1012,10 @@ export const register: Register = on => {
         )}
         {/* The workspaces and signing out, below the list: out of the arrows'
             way between the filter and the tabs. */}
-        {!sc && (
+        {!sc && key === DEMO && (
+          <Text dimColor>Halcyon · a made-up workspace: nothing here is real · /linear for yours</Text>
+        )}
+        {!sc && key !== DEMO && (
           <Box flexDirection="row" gap={1} flexWrap="wrap">
             {spaces.map(w => (
               <Button

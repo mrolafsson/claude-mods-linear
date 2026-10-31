@@ -319,3 +319,35 @@ test('↑ from the filter switches the tab, the cursor staying in the filter', a
   expect(await options(ui)).toContain('issue-HAL-231')
   await ui.unmount()
 })
+
+test('/linear demo: Halcyon, with no account, no network and no cloud session', async ($, on) => {
+  const fetched: string[] = []
+  const ran: string[][] = []
+  engine(on)
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('http.fetch', (_: unknown, e: any) => {
+    fetched.push(e.url)
+    return { value: { status: 500, ok: false, headers: {}, text: '{}', requestId: '' } as any }
+  })
+  on('process.run', (_: unknown, e: any) => {
+    ran.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '' } as any }
+  })
+  on('ui.focus', () => ({}))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await ($.command.run as any)({ command: 'linear', args: 'demo' })
+  await settle()
+
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await options(ui)).toContain('issue-HAL-231')
+  expect(await ui.find({ type: 'Text', text: /made-up workspace/ })).toBeDefined()
+  await ui.press({ key: 'issue-HAL-198' })
+  await settle()
+  await ui.press({ key: 'start' })
+  await settle()
+  expect(await ui.find({ type: 'Text', text: /^Demo: HAL-198 is yours and In Progress/ })).toBeDefined()
+  await ui.unmount()
+  expect(fetched).toEqual([])
+  expect(ran).toEqual([])
+})
