@@ -201,6 +201,10 @@ installed too, the two find each other, with nothing to configure:
   **GitHub ›** in its crumb.
 - **Esc** in the pane you went to comes back to the one you came from, as you
   left it.
+- In a terminal too narrow for Claude Code to draw the other pane (it holds
+  back a pane a mod opens by itself under 110 columns, which a jump by Esc
+  is), the command is put in the prompt instead: Enter opens it. A draft
+  you're typing is left alone.
 
 Without the GitHub mod, an issue's pull requests are links to GitHub.
 `/linear issue HAL-212` opens an issue straight away, as the GitHub mod does.

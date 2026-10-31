@@ -633,22 +633,41 @@ async function leaveProject($: EngineInterface) {
   await focusOn($, at >= 0 && sc ? `project-${sc.id}` : 'filter')
 }
 
+// To another mod's pane: this one closes, and this mod opens that one, by
+// its id, which that mod draws. Opened here, as the answer to the person's
+// press, it's drawn at any width with the keyboard in it; a pane a mod opens
+// for another on its own would get neither (Claude Code holds it undrawn
+// under 144 columns). What it's to show goes in its title: `⟨args⟩`, which
+// that mod reads and puts right. Should it not be drawn, the command goes in
+// the prompt instead, for Enter.
+async function jump($: EngineInterface, command: string, args: string, name: string) {
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  const r = await $.ui
+    .open({ id: command, title: `${name} ⟨${args}⟩`, focus: true, closeOnEscape: true, holdToasts: true, rows: 1000, columns: 1000 })
+    .catch(() => ({ isPlaced: false }))
+  if (r.isPlaced) return
+  const text = `/${command} ${args}`
+  const box = await $.prompt.read().catch(() => ({ text: '' }))
+  const draft = box.text.trim()
+  if (draft && !/^\/(linear|github)(\s|$)/.test(draft)) return $.ui.toast(`${text} opens ${name}.`)
+  const filled = await $.prompt.fill({ text, mode: 'replace' }).catch(() => ({ isFilled: false }))
+  $.ui.toast(filled.isFilled ? `Enter opens ${name}.` : `${text} opens ${name}.`)
+}
+
 // Back to the pane this one was opened from: it closes, that one opens as
 // it was left.
 async function goBackFrom($: EngineInterface): Promise<boolean> {
   const was = await read($, from)
   if (!was) return false
   await update($, from, () => null)
-  await $.ui.close({ id: PANE }).catch(() => undefined)
-  await $.command.run({ command: was, args: 'back' } as any).catch(() => undefined)
+  await jump($, was, 'back', was === 'github' ? 'GitHub' : was === 'linear' ? 'Linear' : was)
   return true
 }
 
 // A pull request in the GitHub mod: there, and Esc there back here.
 async function openGithub($: EngineInterface, prKey: string) {
   const demo = (await read($, workspace)) === DEMO
-  await $.ui.close({ id: PANE }).catch(() => undefined)
-  await $.command.run({ command: 'github', args: `${demo ? 'demo ' : ''}pr ${prKey} from:linear` } as any).catch(() => undefined)
+  await jump($, 'github', `${demo ? 'demo ' : ''}pr ${prKey} from:linear`, 'GitHub')
 }
 
 // Back to the list, the keyboard on the issue it came from.
@@ -670,6 +689,76 @@ async function signOut($: EngineInterface, key: string) {
   await say($, `Signed out of ${key} here.`)
 }
 
+// What /linear and its arguments do: also how the GitHub mod's pane opens
+// this one (in its title, as below).
+async function arrive($: EngineInterface, args: string) {
+  // A notice is for the moment it's given: none from an earlier opening.
+  await update($, notice, () => null)
+  const list = ((await $.store.get('workspaces')) as Workspace[] | undefined) ?? []
+  await update($, workspaces, () => list)
+  hasGithub = (await $.command.list().catch(() => [])).some(c => c.name === 'github')
+  const words = args.trim().split(/\s+/).filter(Boolean)
+  // `back`: another mod's pane closed, and this one opens as it was left.
+  if (words[0] === 'back') {
+    if ((await read($, view)).screen === 'list') await focusFirst($)
+    else await openPane($)
+    return
+  }
+  await update($, from, () => words.find(w => w.startsWith('from:'))?.slice(5) ?? null)
+  // `issue KEY`, as another mod opens one: its screen, straight away.
+  const issueAt = words.indexOf('issue')
+  const wanted = issueAt >= 0 ? words[issueAt + 1]?.toUpperCase() : undefined
+  if (wanted) {
+    const chosen = await read($, workspace)
+    const key = words.includes(DEMO) ? DEMO : chosen && list.some(w => w.key === chosen) ? chosen : list[0]?.key
+    if (!key) {
+      await beginSignIn($)
+      await openPane($)
+      return
+    }
+    await update($, workspace, () => key)
+    await update($, scope, () => null)
+    if (!(await read($, loaded))[key]) void load($, key)
+    // The issue first, then the pane: opened on a screen already whole, no
+    // element of it takes the ring (it would sit on Start, an Enter away).
+    await openIssue($, key, wanted)
+    await openPane($)
+    await update($, view, x => ({ ...x }))
+    return
+  }
+  if (words.includes(DEMO)) {
+    // `/linear demo`: the made-up workspace, no account needed.
+    await update($, workspace, () => DEMO)
+    await update($, scope, () => null)
+    await update($, view, (): View => ({ screen: 'list' }))
+    await load($, DEMO)
+  } else if (list.length === 0) {
+    await beginSignIn($)
+  } else {
+    const chosen = await read($, workspace)
+    const key: string = chosen && list.some(w => w.key === chosen) ? chosen : list[0]!.key
+    await update($, workspace, () => key)
+    // What was found last time shows at once; Linear is asked again behind it.
+    const kept = await $.store.get(`issues:${key}`)
+    if (Array.isArray(kept) && !(await read($, loaded))[key]) {
+      await update($, loaded, l => ({ ...l, [key]: { issues: kept as Issue[], at: 0, error: null, isLoading: true } }))
+    }
+    if ((await read($, view)).screen === 'signin' && !(await read($, signin))) await update($, view, (): View => ({ screen: 'list' }))
+    void load($, key)
+  }
+  // The keyboard in the filter: typing filters, ↓ walks into the issues.
+  if ((await read($, view)).screen === 'list') await focusFirst($)
+  else await openPane($)
+  return
+}
+
+// The arguments another mod's pane opens this one with, from its title
+// (`Name ⟨args⟩`), or null for an ordinary title.
+export function titleArgs(title: string | undefined): string | null {
+  const m = /⟨(.*)⟩/.exec(title ?? '')
+  return m ? m[1]! : null
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
@@ -680,65 +769,21 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'linear' }, async ($, e) => {
-    // A notice is for the moment it's given: none from an earlier opening.
-    await update($, notice, () => null)
-    const list = ((await $.store.get('workspaces')) as Workspace[] | undefined) ?? []
-    await update($, workspaces, () => list)
-    hasGithub = (await $.command.list().catch(() => [])).some(c => c.name === 'github')
-    const words = e.args.trim().split(/\s+/).filter(Boolean)
-    // `back`: another mod's pane closed, and this one opens as it was left.
-    if (words[0] === 'back') {
-      if ((await read($, view)).screen === 'list') await focusFirst($)
-      else await openPane($)
-      return { text: 'Linear pane opened.' }
-    }
-    await update($, from, () => words.find(w => w.startsWith('from:'))?.slice(5) ?? null)
-    // `issue KEY`, as another mod opens one: its screen, straight away.
-    const issueAt = words.indexOf('issue')
-    const wanted = issueAt >= 0 ? words[issueAt + 1]?.toUpperCase() : undefined
-    if (wanted) {
-      const chosen = await read($, workspace)
-      const key = words.includes(DEMO) ? DEMO : chosen && list.some(w => w.key === chosen) ? chosen : list[0]?.key
-      if (!key) {
-        await beginSignIn($)
-        await openPane($)
-        return { text: 'Linear pane opened.' }
-      }
-      await update($, workspace, () => key)
-      await update($, scope, () => null)
-      if (!(await read($, loaded))[key]) void load($, key)
-      // The issue first, then the pane: opened on a screen already whole, no
-      // element of it takes the ring (it would sit on Start, an Enter away).
-      await openIssue($, key, wanted)
-      await openPane($)
-      await update($, view, x => ({ ...x }))
-      return { text: 'Linear pane opened.' }
-    }
-    if (words.includes(DEMO)) {
-      // `/linear demo`: the made-up workspace, no account needed.
-      await update($, workspace, () => DEMO)
-      await update($, scope, () => null)
-      await update($, view, (): View => ({ screen: 'list' }))
-      await load($, DEMO)
-    } else if (list.length === 0) {
-      await beginSignIn($)
-    } else {
-      const chosen = await read($, workspace)
-      const key: string = chosen && list.some(w => w.key === chosen) ? chosen : list[0]!.key
-      await update($, workspace, () => key)
-      // What was found last time shows at once; Linear is asked again behind it.
-      const kept = await $.store.get(`issues:${key}`)
-      if (Array.isArray(kept) && !(await read($, loaded))[key]) {
-        await update($, loaded, l => ({ ...l, [key]: { issues: kept as Issue[], at: 0, error: null, isLoading: true } }))
-      }
-      if ((await read($, view)).screen === 'signin' && !(await read($, signin))) await update($, view, (): View => ({ screen: 'list' }))
-      void load($, key)
-    }
-    // The keyboard in the filter: typing filters, ↓ walks into the issues.
-    if ((await read($, view)).screen === 'list') await focusFirst($)
-    else await openPane($)
+    await arrive($, e.args)
     return { text: 'Linear pane opened.' }
   })
+
+  // The GitHub mod opens this pane itself, as the person's press there (so
+  // it's drawn at any width, with the keyboard), the arguments in its title:
+  // `Linear ⟨issue KEY from:x⟩`. The title is put right, then they're acted on.
+  on('ui.open', async ($, e, next) => {
+    const args = e.id === PANE ? titleArgs(e.title) : null
+    if (args === null) return next(e)
+    const r = await next({ ...e, title: 'Linear' })
+    void arrive($, args)
+    return r
+  })
+
 
   // Esc on an issue (or a sign-in with somewhere to go back to) goes back to
   // the list, onto the issue it came from. On the list the first Esc clears

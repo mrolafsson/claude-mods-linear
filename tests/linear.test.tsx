@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import { titleArgs } from '../hooks/register'
+
 const PANE = {
   plugin: 'linear',
   component: 'Pane',
@@ -85,11 +87,14 @@ function fakeLinear(on: any, store: Map<string, unknown>, issues: unknown[] = IS
   return { sent, tokens }
 }
 
-function engine(on: any) {
+function engine(on: any, opened: { id: string; title?: string }[] = []) {
   on('command.register', () => ({ value: { command: 'linear' } }))
   // The clock: no waiting in a test.
   on('clock.sleep', () => ({ value: undefined }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.open', (_: unknown, e: any) => {
+    opened.push({ id: e.id, title: e.title })
+    return { value: { isPlaced: true } } as any
+  })
   on('ui.toast', () => ({ value: undefined }))
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: '/repo' }))
@@ -354,18 +359,14 @@ test('/linear demo: Halcyon, with no account, no network and no cloud session', 
   expect(ran).toEqual([])
 })
 
-test('with the GitHub mod: /linear issue opens the issue, its PRs open there, Esc goes back', async ($, on) => {
-  engine(on)
+test('with the GitHub mod: /linear issue opens the issue; its PR opens the GitHub pane, as the press', async ($, on) => {
+  const opened: { id: string; title?: string }[] = []
+  engine(on, opened)
   on('store.get', () => ({ value: undefined }))
   on('store.set', () => ({ value: undefined }))
   on('ui.focus', () => ({}))
   on('ui.close', () => ({ value: undefined }))
   on('command.list', () => ({ value: [{ name: 'linear', description: '' }, { name: 'github', description: '' }] as any }))
-  const github: string[] = []
-  on('command.run', { command: 'github' }, (_: unknown, e: any) => {
-    github.push(e.args)
-    return { text: '' }
-  })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   await ($.command.run as any)({ command: 'linear', args: 'demo issue HAL-231 from:github' })
   await settle()
@@ -375,12 +376,7 @@ test('with the GitHub mod: /linear issue opens the issue, its PRs open there, Es
   expect(await ui.find({ type: 'Text', text: /sam\/hal-231-search-accents/ })).toBeDefined()
   await ui.press({ key: 'pr-halcyon/notes-app#479' })
   await settle()
-  expect(github[0]).toBe('demo pr halcyon/notes-app#479 from:linear')
-
-  // Back, as Esc does: to the GitHub pane, as it was left.
-  await ui.press({ key: 'back' })
-  await settle()
-  expect(github[1]).toBe('back')
+  expect(opened.at(-1)).toEqual({ id: 'github', title: 'GitHub ⟨demo pr halcyon/notes-app#479 from:linear⟩' })
   await ui.unmount()
 })
 
@@ -414,4 +410,9 @@ test('w: the issue\'s worktree beside the checkout, on Linear\'s branch, from th
   expect(ran.find(a => a.includes('add'))).toEqual(['git', 'worktree', 'add', '--no-track', '-b', 'sam/hal-231', '/repo.worktrees/sam-hal-231', 'origin/main'])
   expect(await ui.find({ type: 'Text', text: /HAL-231's worktree is at \/repo\.worktrees\/sam-hal-231/ })).toBeDefined()
   await ui.unmount()
+})
+
+test('opened by the GitHub mod: its arguments are read from the title', () => {
+  expect(titleArgs('Linear ⟨demo issue HAL-231 from:github⟩')).toBe('demo issue HAL-231 from:github')
+  expect(titleArgs('Linear')).toBe(null)
 })
