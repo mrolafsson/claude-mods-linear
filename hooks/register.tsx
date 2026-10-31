@@ -834,7 +834,8 @@ export const register: Register = on => {
     const isLoading = showsProjects ? Boolean(proj?.isLoading) : Boolean(source?.isLoading)
     const error = showsProjects ? proj?.error : source?.error
     const sel = Math.max(0, Math.min(await read($, selected), rows.length - 1))
-    // The header, the filter, the gaps and the counts take about 12 lines;
+    // The header, the filter, the gaps and the workspaces' row take about
+    // 12 lines;
     // a note or an error two more, a project's header one.
     room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 12 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
     // Centred on the keyboard's row, so a held arrow finds rows drawn ahead.
@@ -891,22 +892,6 @@ export const register: Register = on => {
             {tabButton('issues', 'Issues', mine?.issues.length ?? null)}
             {tabButton('projects', 'Projects', proj ? proj.projects.filter(p => PROJECT_STATES.includes(p.state)).length : null)}
             <Text dimColor>{isLoading ? ' loading…' : ' '}</Text>
-            {spaces.map(w => (
-              <Button
-                key={`ws-${w.key}`}
-                plain
-                dimColor={w.key !== key ? true : undefined}
-                label={w.name}
-                onPress={async () => {
-                  await update($, workspace, () => w.key)
-                  await update($, scope, () => null)
-                  await load($, w.key)
-                  if (which === 'projects') await loadProjects($, w.key)
-                }}
-              />
-            ))}
-            <Button key="add" plain dimColor label="+ workspace" onPress={() => beginSignIn($)} />
-            <Button key="signout" plain dimColor label="sign out" onPress={() => signOut($, key)} />
           </Box>
         )}
         {Input && (
@@ -968,6 +953,28 @@ export const register: Register = on => {
               )
             })}
             <Text dimColor>{below ? `↓ ${below} more` : ' '}</Text>
+          </Box>
+        )}
+        {/* The workspaces and signing out, below the list: out of the arrows'
+            way between the filter and the tabs. */}
+        {!sc && (
+          <Box flexDirection="row" gap={1} flexWrap="wrap">
+            {spaces.map(w => (
+              <Button
+                key={`ws-${w.key}`}
+                plain
+                dimColor={w.key !== key ? true : undefined}
+                label={w.name}
+                onPress={async () => {
+                  await update($, workspace, () => w.key)
+                  await update($, scope, () => null)
+                  await load($, w.key)
+                  if (which === 'projects') await loadProjects($, w.key)
+                }}
+              />
+            ))}
+            <Button key="add" plain dimColor label="+ workspace" onPress={() => beginSignIn($)} />
+            <Button key="signout" plain dimColor label="sign out" onPress={() => signOut($, key)} />
           </Box>
         )}
       </Box>
