@@ -853,7 +853,7 @@ export const register: Register = on => {
                 <Link href={i.url} label="open in Linear" />
               </Box>
               <Text dimColor wrap="wrap">
-                {repoName ? `Start runs it in the cloud from ${repoName}, this session's repository.` : "Start needs this session to be in the issue's repository."}
+                {repoName && key !== DEMO ? `Start runs it in the cloud from ${repoName}, this session's repository.` : repoName ? "Start runs it in the cloud from this session's repository." : "Start needs this session to be in the issue's repository."}
               </Text>
             </>
           )}
@@ -954,8 +954,8 @@ export const register: Register = on => {
             key="filter"
             autoFocus
             // Short, so the field never wraps and moves the list as it takes
-            // the keyboard: the Enter hint a glyph.
-            submitLabel="↵"
+            // the keyboard: one word beside Claude Code's own ⏎.
+            submitLabel="open"
             placeholder={hint}
             value={f}
             onInput={async text => {
