@@ -520,6 +520,10 @@ async function openProject($: EngineInterface, key: string, p: Project) {
     )
     const issues: Issue[] = d.project.issues.nodes.map(toIssue)
     await update($, loaded, all => ({ ...all, [id]: { issues, at: Date.now(), error: null, isLoading: false } }))
+    // The keyboard on its first issue: left alone, it stays where it was in
+    // the projects, on whichever issue is drawn there now.
+    const first = rowsOf(await currentLines($))[0]
+    await focusOn($, first ? rowKey(first) : 'filter')
   } catch (err) {
     await update($, loaded, all => ({ ...all, [id]: { issues: [], at: 0, error: message(err), isLoading: false } }))
   }
@@ -532,6 +536,7 @@ async function leaveProject($: EngineInterface) {
   await update($, filter, () => '')
   const at = rowsOf(await currentLines($)).findIndex(l => l.kind === 'project' && l.project.id === sc?.id)
   await update($, selected, () => Math.max(0, at))
+  await focusOn($, at >= 0 && sc ? `project-${sc.id}` : 'filter')
 }
 
 // Back to the list, the keyboard on the issue it came from.
@@ -611,7 +616,6 @@ export const register: Register = on => {
     // Then out of a project's issues, back to the projects.
     if (v.screen === 'list' && (await read($, scope))) {
       await leaveProject($)
-      await focusOn($, 'filter')
       return { value: undefined }
     }
     return next(e)
