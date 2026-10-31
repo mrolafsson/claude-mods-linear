@@ -70,11 +70,8 @@ declare module 'claude-code' {
       details: Shaped<Record<string, Detail>>
       statuses: Shaped<Record<string, Status[]>>
       filter: string
-      // The row the list highlights (-1: the tab bar): the cursor stays in
-      // the filter, and ↑/↓ move this instead.
+      // The row the keyboard is on, which the list is drawn around.
       selected: number
-      // The first row of the list's page: a Select takes 64 rows at most.
-      offset: number
       tab: 'issues' | 'projects'
       projects: Shaped<Record<string, ProjectsLoaded>>
       scope: Shaped<Scope | null>

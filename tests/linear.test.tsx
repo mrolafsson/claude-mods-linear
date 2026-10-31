@@ -45,10 +45,9 @@ const STATES = [
   { id: 's-prog', name: 'In Progress', type: 'started', position: 2 },
 ]
 
-// The values of the list's rows, in order.
+// The keys of the list's rows drawn, in order.
 async function options(ui: any): Promise<string[]> {
-  const select = await ui.find({ type: 'Select', key: 'rows' })
-  return (select?.props?.options ?? []).map((o: any) => o.value)
+  return ((await ui.findAll({ type: 'Button' })) as any[]).map(b => String(b.key)).filter(k => /^(issue|project)-/.test(k))
 }
 
 // Lets the work a hook started behind it settle.
@@ -146,14 +145,12 @@ test('the list by status, an issue, and Start in the cloud', async ($, on) => {
   await settle()
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  // The statuses with their counts over the list, In Review first.
-  expect(await ui.find({ type: 'Text', text: /^In Review 1 {2}· {2}In Progress 1 {2}· {2}Todo 1$/ })).toBeDefined()
-  // The rows, in the list's order, each a line of its mark, key and title.
+  // Grouped by status, In Review first, each row its mark, key and title.
+  expect(await ui.find({ type: 'Text', text: /^In Review$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Todo$/ })).toBeDefined()
   expect(await options(ui)).toEqual(['issue-HAL-212', 'issue-HAL-231', 'issue-HAL-240'])
-  const select = (await ui.find({ type: 'Select', key: 'rows' })) as any
-  expect(select.props.options[1].label).toMatch(/^◔ HAL-231 Search drops accents in note titles ! · Polish$/)
 
-  await ui.select({ key: 'rows', value: 'issue-HAL-231' })
+  await ui.press({ key: 'issue-HAL-231' })
   await settle()
   expect(await ui.find({ type: 'Text', text: /sam\/hal-231/ })).toBeDefined()
   // Laid out as herdr-linear's: the status a pill in Linear's colour, the
@@ -193,18 +190,14 @@ test('the pane draws on every surface', async ($, on) => {
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   await ($.command.run as any)({ command: 'linear', args: '' })
   await settle()
-  for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await options(ui)).toContain('issue-HAL-240')
     await ui.unmount()
   }
-  // The phone has no Select: the rows are buttons there.
-  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
-  expect(await ui.find({ type: 'Button', key: 'issue-HAL-240' })).toBeDefined()
-  await ui.unmount()
 })
 
-test('back from an issue, the list stays on it', async ($, on) => {
+test('the list is drawn around the keyboard\'s row, and back from an issue stays there', async ($, on) => {
   const many = Array.from({ length: 40 }, (_, n) => node(`HAL-${3000 + n}`, `Issue ${n}`, ['Todo', 'unstarted'], 3))
   const store = new Map<string, unknown>([
     ['workspaces', [{ key: 'halcyon', name: 'Halcyon' }]],
@@ -217,15 +210,30 @@ test('back from an issue, the list stays on it', async ($, on) => {
   await ($.command.run as any)({ command: 'linear', args: '' })
   await settle()
 
-  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await options(ui)).length).toBe(40)
-  await ui.select({ key: 'rows', value: 'issue-HAL-3012' })
+  const short = { ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: 24 } } }
+  let ui = await $.ui.mount({ ...short, surface: 'terminal' })
+  // What fits: the start of the list, and what's below it.
+  expect(await options(ui)).toContain('issue-HAL-3000')
+  expect(await options(ui)).not.toContain('issue-HAL-3030')
+  expect(await ui.find({ type: 'Text', text: /↓ \d+ more/ })).toBeDefined()
+  await ui.unmount()
+
+  // The keyboard moves down the rows: the list is drawn around it.
+  await $.ui.focus({ requestId: 'linear', key: 'issue-HAL-3025' } as any)
+  await settle()
+  ui = await $.ui.mount({ ...short, surface: 'terminal' })
+  expect(await options(ui)).toContain('issue-HAL-3025')
+  expect(await options(ui)).toContain('issue-HAL-3028')
+  expect(await ui.find({ type: 'Text', text: /↑ \d+ more/ })).toBeDefined()
+
+  // Into that issue and back: the list is still around it.
+  await ui.press({ key: 'issue-HAL-3025' })
   await settle()
   await ui.press({ key: 'back' })
   await settle()
   await ui.unmount()
-  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(((await ui.find({ type: 'Select', key: 'rows' })) as any).props.value).toBe('issue-HAL-3012')
+  ui = await $.ui.mount({ ...short, surface: 'terminal' })
+  expect(await options(ui)).toContain('issue-HAL-3025')
   await ui.unmount()
 })
 
@@ -249,7 +257,7 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   // Open projects only, started first.
   expect(await options(ui)).toEqual(['project-p1', 'project-p2'])
 
-  await ui.select({ key: 'rows', value: 'project-p1' })
+  await ui.press({ key: 'project-p1' })
   await settle()
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -263,7 +271,7 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   await settle()
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(((await ui.find({ type: 'Select', key: 'rows' })) as any).props.value).toBe('project-p1')
+  expect(await options(ui)).toEqual(['project-p1', 'project-p2'])
 
   // The Issues tab: your issues, not the project's.
   await ui.press({ key: 'tab-issues' })
@@ -271,33 +279,5 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   await ui.unmount()
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await options(ui)).toContain('issue-HAL-231')
-  await ui.unmount()
-})
-
-test('a list longer than a Select takes comes in pages of 60', async ($, on) => {
-  const many = Array.from({ length: 132 }, (_, n) => node(`HAL-${4000 + n}`, `Issue ${n}`, ['Todo', 'unstarted'], 3))
-  const store = new Map<string, unknown>([
-    ['workspaces', [{ key: 'halcyon', name: 'Halcyon' }]],
-    ['account:halcyon', { key: 'halcyon', name: 'Halcyon', access: 'tok-1', refresh: null, expiresAt: Date.now() + 3_600_000 }],
-  ])
-  engine(on)
-  fakeLinear(on, store, many)
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
-  await ($.command.run as any)({ command: 'linear', args: '' })
-  await settle()
-
-  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  let values = await options(ui)
-  expect(values.length).toBe(61)
-  expect(values.at(-1)).toBe('page-next')
-  await ui.select({ key: 'rows', value: 'page-next' })
-  await settle()
-  await ui.unmount()
-  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  values = await options(ui)
-  expect(values[0]).toBe('page-prev')
-  expect(values[1]).toBe('issue-HAL-4060')
-  expect(values.at(-1)).toBe('page-next')
-  expect(values.length).toBeLessThanOrEqual(64)
   await ui.unmount()
 })

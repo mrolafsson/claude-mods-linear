@@ -25,11 +25,8 @@ const details = atom({ plugin: 'linear', key: 'details' } as const, {} as Record
 const statuses = atom({ plugin: 'linear', key: 'statuses' } as const, {} as Record<string, Status[]>, { shape: 'statuses-2' })
 const filter = atom({ plugin: 'linear', key: 'filter' } as const, '')
 const selected = atom({ plugin: 'linear', key: 'selected' } as const, 0)
-const offset = atom({ plugin: 'linear', key: 'offset' } as const, 0)
-
-// The rows a Select shows at once: it takes 64 at most, and the page's two
-// turning rows count among them.
-const PAGE = 60
+// How many lines of the list the pane has room for, as it was last drawn.
+let room = 20
 const tab = atom({ plugin: 'linear', key: 'tab' } as const, 'issues' as 'issues' | 'projects')
 const projects = atom({ plugin: 'linear', key: 'projects' } as const, {} as Record<string, ProjectsLoaded>, { shape: 'projects-1' })
 const scope = atom({ plugin: 'linear', key: 'scope' } as const, null as Scope | null, { shape: 'scope-1' })
@@ -563,6 +560,8 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'linear' }, async $ => {
+    // A notice is for the moment it's given: none from an earlier opening.
+    await update($, notice, () => null)
     const list = ((await $.store.get('workspaces')) as Workspace[] | undefined) ?? []
     await update($, workspaces, () => list)
     if (list.length === 0) {
@@ -624,6 +623,17 @@ export const register: Register = on => {
   // arrow or Tab) is kept there, and moves the highlight instead: onto an
   // element after the filter (the issues) is down, before it (the top bar)
   // is up. The highlight stops at either end.
+  // The keyboard moves through the rows as Claude Code moves it; the list
+  // follows it, drawn around the row it's on.
+  on('ui.focus', async ($, e, next) => {
+    const element = e.element ?? (e as { key?: string }).key
+    if (e.requestId === PANE && element && (element.startsWith('issue-') || element.startsWith('project-'))) {
+      const at = rowsOf(await currentLines($)).findIndex(l => rowKey(l) === element)
+      if (at >= 0) await update($, selected, () => at)
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button, Markdown, Link } = table
@@ -808,10 +818,9 @@ export const register: Register = on => {
       )
     }
 
-    // The list: the tab's rows, grouped by status, in Claude Code's own list
-    // (a Select): its arrows move the highlight, Enter opens the row. The
-    // phone has no Select, and gets the rows as buttons.
-    const Select = e.surface !== 'mobile' && 'Select' in table ? table.Select : null
+    // The list: the tab's rows, grouped by status, as buttons the arrows move
+    // between. The arrows walk a pane's rows only while it fits, so the list
+    // draws the lines there's room for, around the row the keyboard is on.
     const f = (await read($, filter)).toLowerCase()
     const which = await read($, tab)
     const sc = await read($, scope)
@@ -825,41 +834,21 @@ export const register: Register = on => {
     const isLoading = showsProjects ? Boolean(proj?.isLoading) : Boolean(source?.isLoading)
     const error = showsProjects ? proj?.error : source?.error
     const sel = Math.max(0, Math.min(await read($, selected), rows.length - 1))
-    // The page of rows the Select shows, the highlighted row on it.
-    let from = Math.max(0, Math.min(await read($, offset), Math.max(0, rows.length - 1)))
-    if (sel < from || sel >= from + PAGE) from = Math.floor(sel / PAGE) * PAGE
-    const page = rows.slice(from, from + PAGE)
+    // The header, the filter, the gaps and the counts take about 12 lines;
+    // a note or an error two more, a project's header one.
+    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 12 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
+    // Centred on the keyboard's row, so a held arrow finds rows drawn ahead.
+    const selLine = rows[sel] ? listed.indexOf(rows[sel]!) : 0
+    const t = Math.max(0, Math.min(selLine - Math.floor(room / 2), listed.length - room))
+    const shown = listed.slice(t, t + room)
+    // A window opening inside a status still says which.
+    const lead = shown[0] && shown[0].kind !== 'head' && shown[0].kind !== 'gap' ? [...listed.slice(0, t)].reverse().find(l => l.kind === 'head') : undefined
+    const above = rowsOf(listed.slice(0, t)).length
+    const below = rowsOf(listed.slice(t + room)).length
     const open = (l: Line | undefined) =>
       l?.kind === 'issue' ? openIssue($, key, l.issue.id) : l?.kind === 'project' ? openProject($, key, l.project) : undefined
     // Issue keys padded to the longest in the list, so titles line up.
     const idWidth = Math.max(0, ...rows.map(l => (l.kind === 'issue' ? l.issue.id.length : 0)))
-    // A row as one line of text: its mark, key and title, then its project
-    // (or a project's progress, lead and date), cut to the pane's width.
-    const label = (l: Line): string => {
-      if (l.kind === 'project') {
-        const p = l.project
-        const s = look(p.state === 'planned' ? 'unstarted' : p.state, p.state)
-        const extra = [`${Math.round(p.progress * 100)}%`, p.lead, p.targetDate].filter(Boolean).join(' · ')
-        return cut(`${s.mark} ${p.name}  · ${extra}`, width - 4)
-      }
-      if (l.kind !== 'issue') return ''
-      const i = l.issue
-      const s = look(i.statusType, i.status)
-      const row = fit(i, width - 2, idWidth)
-      return `${s.mark} ${i.id.padEnd(idWidth)} ${row.title}${i.priority === 1 ? ' !' : ''}${row.project && !sc ? ` · ${row.project}` : ''}`
-    }
-    const choose = async (value: string) => {
-      // The turning rows: the next or the previous page, its first row chosen.
-      if (value === 'page-next' || value === 'page-prev') {
-        const to = value === 'page-next' ? from + PAGE : Math.max(0, from - PAGE)
-        await update($, offset, () => to)
-        await update($, selected, () => to)
-        return
-      }
-      const at = rows.findIndex(l => rowKey(l) === value)
-      await update($, selected, () => Math.max(0, at))
-      await open(rows[at])
-    }
     const tabButton = (id: 'issues' | 'projects', name: string, n: number | null) => {
       const isOn = which === id
       return (
@@ -877,8 +866,6 @@ export const register: Register = on => {
       : width >= 70
         ? 'Type to filter · ↓ to the list · ↑ to the tabs · Enter opens the first'
         : 'Type to filter… · ↓ list · ↑ tabs'
-    // A status's heading, over the rows of the Select, for the open tab.
-    const counts = listed.filter((l): l is Extract<Line, { kind: 'head' }> => l.kind === 'head')
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -934,7 +921,6 @@ export const register: Register = on => {
             onInput={async text => {
               await update($, filter, () => text)
               await update($, selected, () => 0)
-              await update($, offset, () => 0)
             }}
             onSubmit={() => open(rows[0])}
           />
@@ -944,30 +930,46 @@ export const register: Register = on => {
         {!isLoading && rows.length === 0 && !error && (
           <Text dimColor>{f ? 'Nothing matches.' : which === 'projects' ? 'No open projects.' : sc ? 'No open issues in this project.' : 'Nothing open is assigned to you.'}</Text>
         )}
-        {rows.length > 0 && counts.length > 0 && (
-          <Text dimColor wrap="truncate-end">
-            {counts.map(h => `${h.status} ${h.count}`).join('  ·  ')}
-          </Text>
+        {listed.length > 0 && (
+          <Box flexDirection="column">
+            <Text dimColor>{above ? `↑ ${above} more` : ' '}</Text>
+            {[...(lead ? [lead] : []), ...shown].map(l => {
+              if (l.kind === 'gap') return <Text> </Text>
+              if (l.kind === 'head') {
+                const s = look(l.type, l.status)
+                return (
+                  <Text>
+                    <Text color={s.color} weight="semibold">{l.status}</Text> <Text dimColor>{l.count}</Text>
+                  </Text>
+                )
+              }
+              if (l.kind === 'project') {
+                const p = l.project
+                const s = look(p.state === 'planned' ? 'unstarted' : p.state, p.state)
+                const extra = [`${Math.round(p.progress * 100)}%`, p.lead, p.targetDate].filter(Boolean).join(' · ')
+                return (
+                  <Button key={rowKey(l)} plain onPress={() => openProject($, key, p)}>
+                    <Text color={s.color}>{s.mark}</Text>
+                    <Text> {cut(p.name, Math.max(12, width - extra.length - 6))}</Text>
+                    <Text dimColor> {extra}</Text>
+                  </Button>
+                )
+              }
+              const i = l.issue
+              const s = look(i.statusType, i.status)
+              const row = fit(i, width, idWidth)
+              return (
+                <Button key={rowKey(l)} plain onPress={() => openIssue($, key, i.id)}>
+                  <Text color={s.color}>{s.mark} {i.id.padEnd(idWidth)}</Text>
+                  <Text> {row.title}</Text>
+                  {i.priority === 1 ? <Text color="error"> urgent</Text> : ''}
+                  {row.project && !sc ? <Text dimColor> · {row.project}</Text> : ''}
+                </Button>
+              )
+            })}
+            <Text dimColor>{below ? `↓ ${below} more` : ' '}</Text>
+          </Box>
         )}
-        {rows.length > 0 &&
-          (Select ? (
-            <Select
-              key="rows"
-              options={[
-                ...(from > 0 ? [{ value: 'page-prev', label: `↑ previous ${Math.min(PAGE, from)}` }] : []),
-                ...page.map(l => ({ value: rowKey(l), label: label(l) })),
-                ...(from + PAGE < rows.length ? [{ value: 'page-next', label: `↓ next ${Math.min(PAGE, rows.length - from - PAGE)} (of ${rows.length})` }] : []),
-              ]}
-              value={rowKey(rows[sel]!)}
-              onSelect={value => void choose(value)}
-            />
-          ) : (
-            <Box flexDirection="column">
-              {rows.map(l => (
-                <Button key={rowKey(l)} plain label={label(l)} onPress={() => open(l)} />
-              ))}
-            </Box>
-          ))}
       </Box>
     )
   })
