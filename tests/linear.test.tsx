@@ -291,3 +291,31 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   expect(await options(ui)).toContain('issue-HAL-231')
   await ui.unmount()
 })
+
+test('↑ from the filter switches the tab, the cursor staying in the filter', async ($, on) => {
+  const store = new Map<string, unknown>([
+    ['workspaces', [{ key: 'halcyon', name: 'Halcyon' }]],
+    ['account:halcyon', { key: 'halcyon', name: 'Halcyon', access: 'tok-1', refresh: null, expiresAt: Date.now() + 3_600_000 }],
+  ])
+  engine(on)
+  fakeLinear(on, store)
+  on('ui.focus', () => ({}))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await ($.command.run as any)({ command: 'linear', args: '' })
+  await settle()
+
+  // ↑ lands on a tab, above the filter: kept, and the tab switches.
+  const r = await $.ui.focus({ requestId: 'linear', key: 'tab-issues' } as any)
+  expect((r as any).deny).toContain('cursor stays in the filter')
+  await settle()
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await options(ui)).toEqual(['project-p1', 'project-p2'])
+  await ui.unmount()
+
+  // And again, back to Issues.
+  await $.ui.focus({ requestId: 'linear', key: 'tab-projects' } as any)
+  await settle()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await options(ui)).toContain('issue-HAL-231')
+  await ui.unmount()
+})

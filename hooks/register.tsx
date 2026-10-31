@@ -27,6 +27,9 @@ const filter = atom({ plugin: 'linear', key: 'filter' } as const, '')
 const selected = atom({ plugin: 'linear', key: 'selected' } as const, 0)
 // How many lines of the list the pane has room for, as it was last drawn.
 let room = 20
+
+// The element the pane's keyboard is on: the filter, as it opens.
+let ring: string | null = null
 const tab = atom({ plugin: 'linear', key: 'tab' } as const, 'issues' as 'issues' | 'projects')
 const projects = atom({ plugin: 'linear', key: 'projects' } as const, {} as Record<string, ProjectsLoaded>, { shape: 'projects-1' })
 const scope = atom({ plugin: 'linear', key: 'scope' } as const, null as Scope | null, { shape: 'scope-1' })
@@ -453,7 +456,8 @@ async function openPane($: EngineInterface) {
 // Moves the keyboard to an element of the pane, once the pane has it again.
 async function focusOn($: EngineInterface, key: string) {
   await openPane($)
-  await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+  const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
+  if (!r.deny) ring = key
 }
 
 // The issues the list shows, by status in the order it shows them.
@@ -629,13 +633,25 @@ export const register: Register = on => {
   // is up. The highlight stops at either end.
   // The keyboard moves through the rows as Claude Code moves it; the list
   // follows it, drawn around the row it's on.
+  //
+  // ↑ from the filter switches the tab, the cursor staying in the filter:
+  // the tabs are all there is above it, so a move from it onto one is ↑ (or
+  // a click on one), and it's kept from leaving.
   on('ui.focus', async ($, e, next) => {
     const element = e.element ?? (e as { key?: string }).key
+    const origin = e.origin as { kind: string; name?: string } | undefined
+    const isOwn = origin?.kind === 'plugin' && /^linear(@|$)/.test(origin.name ?? '')
+    if (e.requestId === PANE && !isOwn && (ring ?? 'filter') === 'filter' && element?.startsWith('tab-')) {
+      await switchTab($, (await read($, tab)) === 'issues' ? 'projects' : 'issues')
+      return { deny: 'The tab switched; the cursor stays in the filter.' }
+    }
     if (e.requestId === PANE && element && (element.startsWith('issue-') || element.startsWith('project-'))) {
       const at = rowsOf(await currentLines($)).findIndex(l => rowKey(l) === element)
       if (at >= 0) await update($, selected, () => at)
     }
-    return next(e)
+    const moved = await next(e)
+    if (!moved.deny && e.requestId === PANE && element) ring = element
+    return moved
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -857,7 +873,14 @@ export const register: Register = on => {
     const tabButton = (id: 'issues' | 'projects', name: string, n: number | null) => {
       const isOn = which === id
       return (
-        <Button key={`tab-${id}`} plain onPress={() => switchTab($, id)}>
+        <Button
+          key={`tab-${id}`}
+          plain
+          onPress={async () => {
+            await switchTab($, id)
+            await focusOn($, 'filter')
+          }}
+        >
           <Text inverse={isOn || undefined} weight={isOn ? 'semibold' : undefined} color={isOn ? 'suggestion' : undefined}>
             {` ${name}${n === null ? '' : ` ${n}`} `}
           </Text>
@@ -869,8 +892,8 @@ export const register: Register = on => {
         ? 'Type to filter · ↓ to the list · Enter opens the first · Esc back to the projects'
         : 'Type to filter… · ↓ list · Esc back'
       : width >= 70
-        ? 'Type to filter · ↓ to the list · ↑ to the tabs · Enter opens the first'
-        : 'Type to filter… · ↓ list · ↑ tabs'
+        ? `Type to filter · ↓ to the list · ↑ switches to ${which === 'issues' ? 'Projects' : 'Issues'} · Enter opens the first`
+        : `Type to filter… · ↓ list · ↑ ${which === 'issues' ? 'Projects' : 'Issues'}`
 
     return (
       <Box flexDirection="column" gap={1}>
