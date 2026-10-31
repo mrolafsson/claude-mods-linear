@@ -9,8 +9,8 @@ works in a terminal session and in the desktop app's Code tab.
 
 - **Your open issues**, grouped by status (In Review and In Progress first),
   in Linear's own marks and colours, urgent ones marked.
-- **Type to filter.** The cursor stays in the filter: ↑ and ↓ move the
-  highlight, Enter opens the issue, Esc clears the filter, then closes.
+- **Type to filter**, then ↓ into the list, ↑ and ↓ through it and Enter to
+  open. Esc clears the filter, then closes.
 - **Projects**, grouped by state, with progress, lead and target date. A
   project opens on its own screen with its open issues.
 - **An issue's screen**, laid out as herdr-linear's: status in Linear's colour, priority, project, assignee, labels in their colours, cycle, due
@@ -56,10 +56,10 @@ Type `/linear`. The first time, it asks you to sign in:
 
 | Key | Does |
 | --- | --- |
-| type | filter |
-| ↑ ↓ | move the highlight; ↑ from the first row reaches the tabs |
-| ↑ on the tabs, Enter | choose Issues or Projects, open it |
-| Enter | open the highlighted issue or project |
+| type | filter; Enter opens the first match |
+| ↓ | from the filter into the list |
+| ↑ ↓, Enter | through the list; open the issue or project |
+| ↑ from the filter | to the tabs: ← → between Issues and Projects, Enter to switch |
 | Esc | clear the filter; back from an issue or a project; close |
 | s, c, y, b | on an issue: start in cloud, status, copy branch, back |
 

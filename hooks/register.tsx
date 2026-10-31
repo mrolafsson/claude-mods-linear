@@ -10,7 +10,7 @@
 // tokens are kept in the plugin's store, on this machine.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, UiFocusInput } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Detail, Issue, Loaded, Notice, Project, ProjectsLoaded, Scope, SignIn, Status, View, Workspace } from '../types'
 
@@ -29,9 +29,8 @@ const tab = atom({ plugin: 'linear', key: 'tab' } as const, 'issues' as 'issues'
 const projects = atom({ plugin: 'linear', key: 'projects' } as const, {} as Record<string, ProjectsLoaded>, { shape: 'projects-1' })
 const scope = atom({ plugin: 'linear', key: 'scope' } as const, null as Scope | null, { shape: 'scope-1' })
 
-// The list's lines as drawn: a heading per status, its issues, a blank
-// between statuses. The arrows walk a pane's rows only while it fits, so the
-// list shows the lines there's room for, around the keyboard's issue.
+// The list's lines: a heading per status, its issues, a blank between
+// statuses.
 type Line =
   | { kind: 'head'; status: string; count: number; type: string }
   | { kind: 'issue'; issue: Issue }
@@ -93,16 +92,6 @@ function fit(i: Issue, width: number, idWidth = i.id.length): { title: string; p
   return { title, project: left >= 4 ? cut(i.project, left) : null }
 }
 
-// How many lines of issues the pane has room for, as it was last drawn.
-let room = 20
-
-// Where the pane's focus ring is: the filter, mostly.
-let ring: string | null = null
-
-// The first row drawn after the filter, as last drawn: a move from the filter
-// onto it is ↓. A move anywhere else is ↑, wherever it lands: above the
-// filter, or round to the last row when nothing above it takes the ring.
-let firstShown: string | null = null
 
 const notice = atom({ plugin: 'linear', key: 'notice' } as const, null as Notice | null, { shape: 'notice-1' })
 
@@ -462,8 +451,7 @@ async function openPane($: EngineInterface) {
 // Moves the keyboard to an element of the pane, once the pane has it again.
 async function focusOn($: EngineInterface, key: string) {
   await openPane($)
-  const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
-  if (!r.deny) ring = key
+  await $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
 }
 
 // The issues the list shows, by status in the order it shows them.
@@ -551,8 +539,8 @@ async function back($: EngineInterface, from: string | null) {
   // The highlight on the issue it came from, the cursor in the filter.
   const at = from ? rowsOf(await currentLines($)).findIndex(l => l.kind === 'issue' && l.issue.id === from) : -1
   await update($, selected, () => Math.max(0, at))
-  ring = null
-  await focusOn($, 'filter')
+  // The keyboard back in the list, on the row it came from.
+  await focusOn($, at >= 0 ? 'rows' : 'filter')
 }
 
 async function signOut($: EngineInterface, key: string) {
@@ -631,41 +619,6 @@ export const register: Register = on => {
   // arrow or Tab) is kept there, and moves the highlight instead: onto an
   // element after the filter (the issues) is down, before it (the top bar)
   // is up. The highlight stops at either end.
-  on('ui.focus', async ($, e, next) => {
-    // The person's move names the element; a plugin's `$.ui.focus` its key.
-    const element = e.element ?? (e as { key?: string }).key
-    // Not the pane's own move (only it and the person move its ring; a test's
-    // stand-in for the person is a plugin of another name).
-    const origin = e.origin as UiFocusInput['origin'] | undefined
-    const isOwn = origin?.kind === 'plugin' && /^linear(@|$)/.test(origin.name)
-    // No move seen yet: the filter, where the list opens with the cursor.
-    if (e.requestId === PANE && !isOwn && (ring ?? 'filter') === 'filter' && (await read($, view)).screen === 'list') {
-      // A click on a tab: that tab.
-      if (element === 'tab-issues' || element === 'tab-projects') {
-        await switchTab($, element === 'tab-issues' ? 'issues' : 'projects')
-        return { deny: 'The cursor stays in the filter; the tab changed.' }
-      }
-      // The arrows move the ring to the nearest element above or below on
-      // screen. The filter is framed by a rule on the line above and the
-      // line below it, nearer than anything else, so ↑ lands on the top one
-      // and ↓ on the bottom one. (Rows, a notice's buttons below and the
-      // tabs above count too, should one ever be nearer.)
-      const down = element === 'gate-down' || Boolean(element && (element.startsWith('issue-') || element.startsWith('project-') || element === 'copy-link' || element === 'dismiss'))
-      const count = rowsOf(await currentLines($)).length
-      const sel = await read($, selected)
-      // Above the first row is the tab bar: -1 with the open tab chosen, -2
-      // with the other. ↑ there moves between them; Enter opens the chosen.
-      // In a project there is no tab bar: ↑ stops at its first issue.
-      const floor = (await read($, scope)) ? 0 : -1
-      if (sel <= -1) await update($, selected, () => (down ? 0 : sel === -1 ? -2 : -1))
-      else await update($, selected, n => Math.max(floor, Math.min(count - 1, n + (down ? 1 : -1))))
-      return { deny: 'The cursor stays in the filter; the highlight moved.' }
-    }
-    const moved = await next(e)
-    if (!moved.deny && e.requestId === PANE && element) ring = element
-    return moved
-  })
-
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button, Markdown, Link } = table
@@ -850,7 +803,10 @@ export const register: Register = on => {
       )
     }
 
-    // The list: the tab's rows, grouped by status, the highlight on one.
+    // The list: the tab's rows, grouped by status, in Claude Code's own list
+    // (a Select): its arrows move the highlight, Enter opens the row. The
+    // phone has no Select, and gets the rows as buttons.
+    const Select = e.surface !== 'mobile' && 'Select' in table ? table.Select : null
     const f = (await read($, filter)).toLowerCase()
     const which = await read($, tab)
     const sc = await read($, scope)
@@ -863,69 +819,50 @@ export const register: Register = on => {
     const rows = rowsOf(listed)
     const isLoading = showsProjects ? Boolean(proj?.isLoading) : Boolean(source?.isLoading)
     const error = showsProjects ? proj?.error : source?.error
-    // What's left of the pane once the header, filter and notes are drawn:
-    // about 14 lines (the header may wrap; the filter's rules take two), a note or an error two more.
-    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 14 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
-    // The highlighted row (-1: the tab bar), and the window of lines around it.
-    const sel = Math.max(sc ? 0 : -2, Math.min(await read($, selected), rows.length - 1))
-    const picked = sel >= 0 ? rows[sel] : undefined
-    const selLine = picked ? listed.indexOf(picked) : 0
-    const t = Math.max(0, Math.min(selLine - Math.floor(room / 2), listed.length - room))
-    const shown = listed.slice(t, t + room)
-    // A window opening inside a status still says which.
-    const lead = shown[0] && shown[0].kind !== 'head' && shown[0].kind !== 'gap' ? [...listed.slice(0, t)].reverse().find(l => l.kind === 'head') : undefined
-    firstShown = shown.map(rowKey).find(Boolean) ?? null
-    const above = rowsOf(listed.slice(0, t)).length
-    const below = rowsOf(listed.slice(t + room)).length
+    const sel = Math.max(0, Math.min(await read($, selected), rows.length - 1))
     const open = (l: Line | undefined) =>
       l?.kind === 'issue' ? openIssue($, key, l.issue.id) : l?.kind === 'project' ? openProject($, key, l.project) : undefined
     // Issue keys padded to the longest in the list, so titles line up.
     const idWidth = Math.max(0, ...rows.map(l => (l.kind === 'issue' ? l.issue.id.length : 0)))
-    // The tab bar: the open tab filled; with the highlight on the bar, the
-    // other tab outlined in the accent colour, as what ↑ switches to.
-    const onBar = sel < 0
-    // The tab the highlight is on, while it's on the bar.
-    const chosen: 'issues' | 'projects' = sel === -2 ? (which === 'issues' ? 'projects' : 'issues') : which
-    const tabButton = (id: 'issues' | 'projects', label: string, n: number | null) => {
+    // A row as one line of text: its mark, key and title, then its project
+    // (or a project's progress, lead and date), cut to the pane's width.
+    const label = (l: Line): string => {
+      if (l.kind === 'project') {
+        const p = l.project
+        const s = look(p.state === 'planned' ? 'unstarted' : p.state, p.state)
+        const extra = [`${Math.round(p.progress * 100)}%`, p.lead, p.targetDate].filter(Boolean).join(' · ')
+        return cut(`${s.mark} ${p.name}  · ${extra}`, width - 4)
+      }
+      if (l.kind !== 'issue') return ''
+      const i = l.issue
+      const s = look(i.statusType, i.status)
+      const row = fit(i, width - 2, idWidth)
+      return `${s.mark} ${i.id.padEnd(idWidth)} ${row.title}${i.priority === 1 ? ' !' : ''}${row.project && !sc ? ` · ${row.project}` : ''}`
+    }
+    const choose = async (value: string) => {
+      const at = rows.findIndex(l => rowKey(l) === value)
+      await update($, selected, () => Math.max(0, at))
+      await open(rows[at])
+    }
+    const tabButton = (id: 'issues' | 'projects', name: string, n: number | null) => {
       const isOn = which === id
       return (
         <Button key={`tab-${id}`} plain onPress={() => switchTab($, id)}>
-          <Text
-            inverse={isOn || undefined}
-            weight={isOn ? 'semibold' : undefined}
-            color={isOn ? 'suggestion' : undefined}
-            underline={(onBar && chosen === id) || undefined}
-          >
-            {` ${label}${n === null ? '' : ` ${n}`} `}
+          <Text inverse={isOn || undefined} weight={isOn ? 'semibold' : undefined} color={isOn ? 'suggestion' : undefined}>
+            {` ${name}${n === null ? '' : ` ${n}`} `}
           </Text>
         </Button>
       )
     }
-    const other = which === 'issues' ? 'Projects' : 'Issues'
-    // On the bar, what Enter does comes first, naming the tab it lands on.
-    const here = which === 'issues' ? 'Issues' : 'Projects'
-    const hint = onBar
-      ? chosen === which
-        ? `Enter stays on ${here} · ↑ to ${other} · ↓ back to the list`
-        : `Enter opens ${other} · ↑ back to ${here} · ↓ back to the list`
-      : sel === 0 && !sc
-        ? `Type to filter · ↓ to choose · ↑ to the tabs · Enter to open · Esc clears`
-        : sc
-          ? 'Type to filter · ↑↓ to choose · Enter to open · Esc back to the projects'
-          : which === 'projects'
-          ? 'Type to filter · ↑↓ to choose · Enter for its issues · Esc clears'
-          : 'Type to filter · ↑↓ to choose · Enter to open · Esc clears'
-
-    // The same, for a narrow pane, where the long one would wrap.
-    const shortHint = onBar
-      ? chosen === which
-        ? `↵ ${here} · ↑ ${other}`
-        : `↵ ${other} · ↑ ${here}`
-      : sel === 0 && !sc
-        ? 'Type to filter… · ↑ tabs'
-        : sc
-          ? 'Type to filter… · Esc back'
-          : 'Type to filter… · ↑↓ · ↵'
+    const hint = sc
+      ? width >= 70
+        ? 'Type to filter · ↓ to the list · Enter opens the first · Esc back to the projects'
+        : 'Type to filter… · ↓ list · Esc back'
+      : width >= 70
+        ? 'Type to filter · ↓ to the list · ↑ to the tabs · Enter opens the first'
+        : 'Type to filter… · ↓ list · ↑ tabs'
+    // A status's heading, over the rows of the Select, for the open tab.
+    const counts = listed.filter((l): l is Extract<Line, { kind: 'head' }> => l.kind === 'head')
 
     return (
       <Box flexDirection="column" gap={1}>
@@ -947,95 +884,64 @@ export const register: Register = on => {
             )}
           </Box>
         ) : (
-        <Box flexDirection="row" gap={1} flexWrap="wrap">
-          <Text color="claude">{onBar ? '▸' : ' '}</Text>
-          {tabButton('issues', 'Issues', mine?.issues.length ?? null)}
-          {tabButton('projects', 'Projects', proj ? proj.projects.filter(p => PROJECT_STATES.includes(p.state)).length : null)}
-          <Text dimColor>{isLoading ? ' loading…' : ' '}</Text>
-          {spaces.map(w => (
-            <Button
-              key={`ws-${w.key}`}
-              plain
-              dimColor={w.key !== key ? true : undefined}
-              label={w.name}
-              onPress={async () => {
-                await update($, workspace, () => w.key)
-                await update($, scope, () => null)
-                await load($, w.key)
-                if (which === 'projects') await loadProjects($, w.key)
-              }}
-            />
-          ))}
-          <Button key="add" plain dimColor label="+ workspace" onPress={() => beginSignIn($)} />
-          <Button key="signout" plain dimColor label="sign out" onPress={() => signOut($, key)} />
-        </Box>
+          <Box flexDirection="row" gap={1} flexWrap="wrap">
+            {tabButton('issues', 'Issues', mine?.issues.length ?? null)}
+            {tabButton('projects', 'Projects', proj ? proj.projects.filter(p => PROJECT_STATES.includes(p.state)).length : null)}
+            <Text dimColor>{isLoading ? ' loading…' : ' '}</Text>
+            {spaces.map(w => (
+              <Button
+                key={`ws-${w.key}`}
+                plain
+                dimColor={w.key !== key ? true : undefined}
+                label={w.name}
+                onPress={async () => {
+                  await update($, workspace, () => w.key)
+                  await update($, scope, () => null)
+                  await load($, w.key)
+                  if (which === 'projects') await loadProjects($, w.key)
+                }}
+              />
+            ))}
+            <Button key="add" plain dimColor label="+ workspace" onPress={() => beginSignIn($)} />
+            <Button key="signout" plain dimColor label="sign out" onPress={() => signOut($, key)} />
+          </Box>
         )}
         {Input && (
-          <Box flexDirection="column">
-          <Button key="gate-up" plain dimColor label={'─'.repeat(Math.max(10, width - 2))} onPress={() => undefined} />
           <Input
             key="filter"
             autoFocus
             // Short, so the field never wraps and moves the list as it takes
-            // the keyboard: the Enter hint a glyph, the hint itself when wide.
+            // the keyboard: the Enter hint a glyph.
             submitLabel="↵"
-            placeholder={width >= 70 ? hint : shortHint}
+            placeholder={hint}
             value={f}
             onInput={async text => {
               await update($, filter, () => text)
               await update($, selected, () => 0)
             }}
-            onSubmit={() => (onBar ? (chosen === which ? update($, selected, () => 0) : switchTab($, chosen)) : open(picked))}
+            onSubmit={() => open(rows[0])}
           />
-          <Button key="gate-down" plain dimColor label={'─'.repeat(Math.max(10, width - 2))} onPress={() => undefined} />
-          </Box>
         )}
         {noticeRow}
         {error && <Text color="error" wrap="wrap">{error}</Text>}
         {!isLoading && rows.length === 0 && !error && (
           <Text dimColor>{f ? 'Nothing matches.' : which === 'projects' ? 'No open projects.' : sc ? 'No open issues in this project.' : 'Nothing open is assigned to you.'}</Text>
         )}
-        {listed.length > 0 && (
-          <Box flexDirection="column">
-            <Text dimColor>{above ? `↑ ${above} more` : ' '}</Text>
-            {[...(lead ? [lead] : []), ...shown].map(l => {
-              if (l.kind === 'gap') return <Text> </Text>
-              if (l.kind === 'head') {
-                const s = look(l.type, l.status)
-                return (
-                  <Text>
-                    <Text color={s.color} weight="semibold">{l.status}</Text> <Text dimColor>{l.count}</Text>
-                  </Text>
-                )
-              }
-              const isPicked = l === picked || undefined
-              if (l.kind === 'project') {
-                const p = l.project
-                const s = look(p.state === 'planned' ? 'unstarted' : p.state, p.state)
-                const extra = [`${Math.round(p.progress * 100)}%`, p.lead, p.targetDate].filter(Boolean).join(' · ')
-                return (
-                  <Button key={rowKey(l)} plain onPress={() => openProject($, key, p)}>
-                    <Text color={s.color} inverse={isPicked}>{s.mark}</Text>
-                    <Text inverse={isPicked}> {cut(p.name, Math.max(12, width - extra.length - 6))}</Text>
-                    <Text dimColor={!isPicked || undefined} inverse={isPicked}> {extra}</Text>
-                  </Button>
-                )
-              }
-              const i = l.issue
-              const s = look(i.statusType, i.status)
-              const row = fit(i, width, idWidth)
-              return (
-                <Button key={rowKey(l)} plain onPress={() => openIssue($, key, i.id)}>
-                  <Text color={s.color} inverse={isPicked}>{s.mark} {i.id.padEnd(idWidth)}</Text>
-                  <Text inverse={isPicked}> {row.title}</Text>
-                  {i.priority === 1 ? <Text color="error" inverse={isPicked}> urgent</Text> : ''}
-                  {row.project && !sc ? <Text dimColor={!isPicked || undefined} inverse={isPicked}> · {row.project}</Text> : ''}
-                </Button>
-              )
-            })}
-            <Text dimColor>{below ? `↓ ${below} more` : ' '}</Text>
-          </Box>
+        {rows.length > 0 && counts.length > 0 && (
+          <Text dimColor wrap="truncate-end">
+            {counts.map(h => `${h.status} ${h.count}`).join('  ·  ')}
+          </Text>
         )}
+        {rows.length > 0 &&
+          (Select ? (
+            <Select key="rows" options={rows.map(l => ({ value: rowKey(l), label: label(l) }))} value={rowKey(rows[sel]!)} onSelect={value => void choose(value)} />
+          ) : (
+            <Box flexDirection="column">
+              {rows.map(l => (
+                <Button key={rowKey(l)} plain label={label(l)} onPress={() => open(l)} />
+              ))}
+            </Box>
+          ))}
       </Box>
     )
   })
