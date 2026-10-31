@@ -1,0 +1,10 @@
+{
+  "name": "linear",
+  "version": "0.1.0",
+  "description": "Your Linear issues and projects in a pane: read, change status, copy the branch, start in a Claude Code cloud session",
+  "types": "./types/index.d.ts",
+  "license": "MIT",
+  "author": {
+    "name": "Hjortur Stefan Olafsson"
+  }
+}

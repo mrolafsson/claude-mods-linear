@@ -1,0 +1,13 @@
+{
+  "name": "claude-mods-linear",
+  "description": "Linear in a Claude Code pane",
+  "owner": {
+    "name": "Hjortur Stefan Olafsson"
+  },
+  "plugins": [
+    {
+      "name": "linear",
+      "source": "./"
+    }
+  ]
+}
