@@ -273,3 +273,31 @@ test('Projects: a tab of its own; a project opens as its own screen, and its cru
   expect(await options(ui)).toContain('issue-HAL-231')
   await ui.unmount()
 })
+
+test('a list longer than a Select takes comes in pages of 60', async ($, on) => {
+  const many = Array.from({ length: 132 }, (_, n) => node(`HAL-${4000 + n}`, `Issue ${n}`, ['Todo', 'unstarted'], 3))
+  const store = new Map<string, unknown>([
+    ['workspaces', [{ key: 'halcyon', name: 'Halcyon' }]],
+    ['account:halcyon', { key: 'halcyon', name: 'Halcyon', access: 'tok-1', refresh: null, expiresAt: Date.now() + 3_600_000 }],
+  ])
+  engine(on)
+  fakeLinear(on, store, many)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await ($.command.run as any)({ command: 'linear', args: '' })
+  await settle()
+
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  let values = await options(ui)
+  expect(values.length).toBe(61)
+  expect(values.at(-1)).toBe('page-next')
+  await ui.select({ key: 'rows', value: 'page-next' })
+  await settle()
+  await ui.unmount()
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  values = await options(ui)
+  expect(values[0]).toBe('page-prev')
+  expect(values[1]).toBe('issue-HAL-4060')
+  expect(values.at(-1)).toBe('page-next')
+  expect(values.length).toBeLessThanOrEqual(64)
+  await ui.unmount()
+})

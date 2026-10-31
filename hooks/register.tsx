@@ -25,6 +25,11 @@ const details = atom({ plugin: 'linear', key: 'details' } as const, {} as Record
 const statuses = atom({ plugin: 'linear', key: 'statuses' } as const, {} as Record<string, Status[]>, { shape: 'statuses-2' })
 const filter = atom({ plugin: 'linear', key: 'filter' } as const, '')
 const selected = atom({ plugin: 'linear', key: 'selected' } as const, 0)
+const offset = atom({ plugin: 'linear', key: 'offset' } as const, 0)
+
+// The rows a Select shows at once: it takes 64 at most, and the page's two
+// turning rows count among them.
+const PAGE = 60
 const tab = atom({ plugin: 'linear', key: 'tab' } as const, 'issues' as 'issues' | 'projects')
 const projects = atom({ plugin: 'linear', key: 'projects' } as const, {} as Record<string, ProjectsLoaded>, { shape: 'projects-1' })
 const scope = atom({ plugin: 'linear', key: 'scope' } as const, null as Scope | null, { shape: 'scope-1' })
@@ -820,6 +825,10 @@ export const register: Register = on => {
     const isLoading = showsProjects ? Boolean(proj?.isLoading) : Boolean(source?.isLoading)
     const error = showsProjects ? proj?.error : source?.error
     const sel = Math.max(0, Math.min(await read($, selected), rows.length - 1))
+    // The page of rows the Select shows, the highlighted row on it.
+    let from = Math.max(0, Math.min(await read($, offset), Math.max(0, rows.length - 1)))
+    if (sel < from || sel >= from + PAGE) from = Math.floor(sel / PAGE) * PAGE
+    const page = rows.slice(from, from + PAGE)
     const open = (l: Line | undefined) =>
       l?.kind === 'issue' ? openIssue($, key, l.issue.id) : l?.kind === 'project' ? openProject($, key, l.project) : undefined
     // Issue keys padded to the longest in the list, so titles line up.
@@ -840,6 +849,13 @@ export const register: Register = on => {
       return `${s.mark} ${i.id.padEnd(idWidth)} ${row.title}${i.priority === 1 ? ' !' : ''}${row.project && !sc ? ` · ${row.project}` : ''}`
     }
     const choose = async (value: string) => {
+      // The turning rows: the next or the previous page, its first row chosen.
+      if (value === 'page-next' || value === 'page-prev') {
+        const to = value === 'page-next' ? from + PAGE : Math.max(0, from - PAGE)
+        await update($, offset, () => to)
+        await update($, selected, () => to)
+        return
+      }
       const at = rows.findIndex(l => rowKey(l) === value)
       await update($, selected, () => Math.max(0, at))
       await open(rows[at])
@@ -918,6 +934,7 @@ export const register: Register = on => {
             onInput={async text => {
               await update($, filter, () => text)
               await update($, selected, () => 0)
+              await update($, offset, () => 0)
             }}
             onSubmit={() => open(rows[0])}
           />
@@ -934,7 +951,16 @@ export const register: Register = on => {
         )}
         {rows.length > 0 &&
           (Select ? (
-            <Select key="rows" options={rows.map(l => ({ value: rowKey(l), label: label(l) }))} value={rowKey(rows[sel]!)} onSelect={value => void choose(value)} />
+            <Select
+              key="rows"
+              options={[
+                ...(from > 0 ? [{ value: 'page-prev', label: `↑ previous ${Math.min(PAGE, from)}` }] : []),
+                ...page.map(l => ({ value: rowKey(l), label: label(l) })),
+                ...(from + PAGE < rows.length ? [{ value: 'page-next', label: `↓ next ${Math.min(PAGE, rows.length - from - PAGE)} (of ${rows.length})` }] : []),
+              ]}
+              value={rowKey(rows[sel]!)}
+              onSelect={value => void choose(value)}
+            />
           ) : (
             <Box flexDirection="column">
               {rows.map(l => (
