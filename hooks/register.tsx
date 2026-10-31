@@ -22,7 +22,7 @@ const workspace = atom({ plugin: 'linear', key: 'workspace' } as const, null as 
 const workspaces = atom({ plugin: 'linear', key: 'workspaces' } as const, [] as Workspace[], { shape: 'workspaces-1' })
 const signin = atom({ plugin: 'linear', key: 'signin' } as const, null as SignIn | null, { shape: 'signin-1' })
 const loaded = atom({ plugin: 'linear', key: 'loaded' } as const, {} as Record<string, Loaded>, { shape: 'loaded-2' })
-const details = atom({ plugin: 'linear', key: 'details' } as const, {} as Record<string, Detail>, { shape: 'details-3' })
+const details = atom({ plugin: 'linear', key: 'details' } as const, {} as Record<string, Detail>, { shape: 'details-4' })
 const statuses = atom({ plugin: 'linear', key: 'statuses' } as const, {} as Record<string, Status[]>, { shape: 'statuses-2' })
 const filter = atom({ plugin: 'linear', key: 'filter' } as const, '')
 const selected = atom({ plugin: 'linear', key: 'selected' } as const, 0)
@@ -100,6 +100,16 @@ function fit(i: Issue, width: number, idWidth = i.id.length): { title: string; p
 
 
 const notice = atom({ plugin: 'linear', key: 'notice' } as const, null as Notice | null, { shape: 'notice-1' })
+const from = atom({ plugin: 'linear', key: 'from' } as const, null as string | null)
+
+// Whether the GitHub mod is installed, for an issue's pull requests.
+let hasGithub = false
+
+// owner/repo#n from a pull request's address on GitHub, or null.
+export function pullKey(url: string): string | null {
+  const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url)
+  return m ? `${m[1]}#${m[2]}` : null
+}
 
 // ── Linear's OAuth, as herdr-linear signs in ─────────────────────────────────
 
@@ -321,13 +331,26 @@ async function load($: EngineInterface, key: string) {
   }
 }
 
+// No element of an issue's screen has the ring. When the row pressed goes,
+// the ring keeps its place in the order of the elements, which on that
+// screen can be one of its pills: it would look selected, and Enter press
+// it. So the screen is drawn first with no element, which the ring falls off,
+// and then whole.
+let blank = false
+let draws = 0
+
 async function openIssue($: EngineInterface, key: string, id: string) {
+  blank = true
+  const was = draws
   await update($, view, (): View => ({ screen: 'issue', id, picking: false }))
+  for (let n = 0; n < 40 && draws === was; n++) await $.clock.sleep(10)
+  blank = false
+  await update($, view, v => ({ ...v }))
   try {
     const d = await gql(
       $,
       key,
-      `query($id: String!) { issue(id: $id) { ${FIELDS} description dueDate priorityLabel state { color } assignee { displayName isMe } labels { nodes { name color } } cycle { number name } } }`,
+      `query($id: String!) { issue(id: $id) { ${FIELDS} description dueDate priorityLabel state { color } assignee { displayName isMe } labels { nodes { name color } } cycle { number name } attachments { nodes { url title } } } }`,
       { id },
     )
     const i = d.issue
@@ -340,6 +363,10 @@ async function openIssue($: EngineInterface, key: string, id: string) {
       labels: (i.labels?.nodes ?? []).map((l: any) => ({ name: String(l.name), color: l.color ?? null })),
       cycle: i.cycle ? `Cycle ${i.cycle.number}${i.cycle.name ? ` · ${i.cycle.name}` : ''}` : null,
       dueDate: i.dueDate ?? null,
+      prs: (i.attachments?.nodes ?? []).flatMap((a: any) => {
+        const k = pullKey(String(a.url ?? ''))
+        return k ? [{ key: k, title: String(a.title ?? k), url: String(a.url) }] : []
+      }),
     }
     await update($, details, all => ({ ...all, [id]: detail }))
   } catch (err) {
@@ -461,6 +488,53 @@ async function start($: EngineInterface, key: string, d: Detail) {
   }
 }
 
+// The issue's worktree, as herdr-linear's `w` makes it, without herdr: in
+// this session's repository, on Linear's branch name for the issue (so
+// Linear's GitHub integration links the pull request), beside the checkout
+// at <repo>.worktrees/<branch>. One already on the branch is found, in any
+// worktree of the repo; a branch that exists locally is checked out as it
+// is; a new one starts from the remote's default branch, fetched first.
+async function git($: EngineInterface, cwd: string, args: string[]) {
+  try {
+    return await $.process.run(['git', ...args], { cwd, timeoutMs: 120_000 })
+  } catch (err) {
+    return { exitCode: 127, stdout: '', stderr: message(err) }
+  }
+}
+
+async function worktree($: EngineInterface, key: string, i: Issue) {
+  if (!i.branch) return say($, `${i.id} has no branch name in Linear.`, null, true)
+  const repo = await $.session.repo()
+  if (key === DEMO) {
+    const at = `${repo?.root ?? '~/code/halcyon/notes-app'}.worktrees/${i.branch.replace(/[^A-Za-z0-9._-]+/g, '-')}`
+    return say($, `Demo: ${i.id}'s worktree would be at ${at}, on ${i.branch}. Then: cd ${at} && claude`)
+  }
+  if (!repo?.root) return say($, `A worktree needs this session to be in ${i.id}'s repository.`, null, true)
+  // The main checkout, whichever worktree the session is in.
+  const common = await git($, repo.root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])
+  const root = common.exitCode === 0 ? common.stdout.trim().replace(/\/\.git\/?$/, '') : repo.root
+  const list = await git($, root, ['worktree', 'list', '--porcelain'])
+  let path: string | null = null
+  for (const block of list.stdout.split('\n\n')) {
+    if (block.includes(`branch refs/heads/${i.branch}`)) path = /^worktree (.+)$/m.exec(block)?.[1] ?? null
+  }
+  if (!path) {
+    path = `${root}.worktrees/${i.branch.replace(/[^A-Za-z0-9._-]+/g, '-')}`
+    const exists = (await git($, root, ['rev-parse', '--verify', '--quiet', `refs/heads/${i.branch}`])).exitCode === 0
+    let r
+    if (exists) {
+      r = await git($, root, ['worktree', 'add', path, i.branch])
+    } else {
+      await git($, root, ['fetch', '--quiet', 'origin'])
+      const head = await git($, root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
+      const base = head.exitCode === 0 && head.stdout.trim() ? head.stdout.trim() : 'HEAD'
+      r = await git($, root, ['worktree', 'add', '--no-track', '-b', i.branch, path, base])
+    }
+    if (r.exitCode !== 0) return say($, `Couldn't make the worktree: ${(r.stderr || r.stdout).trim().split('\n').pop()}`, null, true)
+  }
+  await say($, `${i.id}'s worktree is at ${path}, on ${i.branch}. Then: cd ${quote(path)} && claude`)
+}
+
 // As a dialog: it takes the keys, and Tab and the arrows walk its rows.
 // Opened again while open, it takes the keyboard back (Esc gave it up).
 async function openPane($: EngineInterface) {
@@ -559,6 +633,24 @@ async function leaveProject($: EngineInterface) {
   await focusOn($, at >= 0 && sc ? `project-${sc.id}` : 'filter')
 }
 
+// Back to the pane this one was opened from: it closes, that one opens as
+// it was left.
+async function goBackFrom($: EngineInterface): Promise<boolean> {
+  const was = await read($, from)
+  if (!was) return false
+  await update($, from, () => null)
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  await $.command.run({ command: was, args: 'back' } as any).catch(() => undefined)
+  return true
+}
+
+// A pull request in the GitHub mod: there, and Esc there back here.
+async function openGithub($: EngineInterface, prKey: string) {
+  const demo = (await read($, workspace)) === DEMO
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  await $.command.run({ command: 'github', args: `${demo ? 'demo ' : ''}pr ${prKey} from:linear` } as any).catch(() => undefined)
+}
+
 // Back to the list, the keyboard on the issue it came from.
 async function back($: EngineInterface, from: string | null) {
   await update($, view, (): View => ({ screen: 'list' }))
@@ -592,7 +684,37 @@ export const register: Register = on => {
     await update($, notice, () => null)
     const list = ((await $.store.get('workspaces')) as Workspace[] | undefined) ?? []
     await update($, workspaces, () => list)
-    if (e.args.trim() === DEMO) {
+    hasGithub = (await $.command.list().catch(() => [])).some(c => c.name === 'github')
+    const words = e.args.trim().split(/\s+/).filter(Boolean)
+    // `back`: another mod's pane closed, and this one opens as it was left.
+    if (words[0] === 'back') {
+      if ((await read($, view)).screen === 'list') await focusFirst($)
+      else await openPane($)
+      return { text: 'Linear pane opened.' }
+    }
+    await update($, from, () => words.find(w => w.startsWith('from:'))?.slice(5) ?? null)
+    // `issue KEY`, as another mod opens one: its screen, straight away.
+    const issueAt = words.indexOf('issue')
+    const wanted = issueAt >= 0 ? words[issueAt + 1]?.toUpperCase() : undefined
+    if (wanted) {
+      const chosen = await read($, workspace)
+      const key = words.includes(DEMO) ? DEMO : chosen && list.some(w => w.key === chosen) ? chosen : list[0]?.key
+      if (!key) {
+        await beginSignIn($)
+        await openPane($)
+        return { text: 'Linear pane opened.' }
+      }
+      await update($, workspace, () => key)
+      await update($, scope, () => null)
+      if (!(await read($, loaded))[key]) void load($, key)
+      // The issue first, then the pane: opened on a screen already whole, no
+      // element of it takes the ring (it would sit on Start, an Enter away).
+      await openIssue($, key, wanted)
+      await openPane($)
+      await update($, view, x => ({ ...x }))
+      return { text: 'Linear pane opened.' }
+    }
+    if (words.includes(DEMO)) {
       // `/linear demo`: the made-up workspace, no account needed.
       await update($, workspace, () => DEMO)
       await update($, scope, () => null)
@@ -628,10 +750,13 @@ export const register: Register = on => {
     // Picking a status: Esc closes the options alone, back on the issue.
     if (v.screen === 'issue' && v.picking) {
       await update($, view, (): View => ({ ...v, picking: false }))
-      // The keyboard back to the pane, on no element, as the issue opened.
+      // The keyboard back to the pane, on no element, as the issue opened;
+      // drawn again then, or its hotkeys stay on the frame before.
       await openPane($)
+      await update($, view, x => ({ ...x }))
       return { value: undefined }
     }
+    if (v.screen === 'issue' && (await goBackFrom($))) return { value: undefined }
     if (v.screen === 'issue' || (v.screen === 'signin' && hasList)) {
       await back($, v.screen === 'issue' ? v.id : null)
       // Answered here, without next: the pane stays open.
@@ -764,7 +889,9 @@ export const register: Register = on => {
       )
     }
 
+    draws++
     // One issue.
+    if (v.screen === 'issue' && blank) return <Text dimColor>Loading {v.id}…</Text>
     if (v.screen === 'issue') {
       const listed = mine?.issues.find(i => i.id === v.id)
       const d = (await read($, details))[v.id]
@@ -772,7 +899,7 @@ export const register: Register = on => {
       // No element has the ring here: the screen is taller than the pane, so
       // the arrows scroll it, and the actions are their letters. (Nor is
       // Start, which makes a cloud session, ever one stray Enter away.)
-      const backButton = pill({ id: 'back', hotkey: 'b', label: 'back', color: 'subtle', onPress: () => back($, v.id) })
+      const backButton = pill({ id: 'back', hotkey: 'b', label: 'back', color: 'subtle', onPress: async () => ((await goBackFrom($)) ? undefined : back($, v.id)) })
       if (!i) return <Box flexDirection="column">{backButton}<Text dimColor>Loading {v.id}…</Text></Box>
       const s = look(i.statusType, i.status)
       // Laid out as herdr-linear's issue screen: the status as a pill in
@@ -788,7 +915,8 @@ export const register: Register = on => {
       const stateColor = hex(d?.statusColor) ?? s.color
       const priority = i.priority === 1 ? null : d?.priorityLabel || PRIORITY[i.priority] || null
       const inProject = await read($, scope)
-      const crumb = inProject ? `Projects › ${cut(inProject.name, 30)} ›` : 'Issues ›'
+      const cameFrom = await read($, from)
+      const crumb = cameFrom === 'github' ? 'GitHub ›' : inProject ? `Projects › ${cut(inProject.name, 30)} ›` : 'Issues ›'
       const options = v.picking ? (await read($, statuses))[i.team] : undefined
       // Start hands the issue to a cloud session of this session's repository.
       const repo = await $.session.repo()
@@ -827,6 +955,19 @@ export const register: Register = on => {
             {field('Cycle', d?.cycle)}
             {field('Due', d?.dueDate)}
             {i.branch && field('Branch', <Text color="planMode" wrap="truncate-end">{i.branch}</Text>)}
+            {d && d.prs.length > 0 && field('PRs', (
+              <Box flexDirection="column">
+                {d.prs.map((pr, n) =>
+                  hasGithub ? (
+                    <Button key={`pr-${pr.key}`} plain hotkey={n === 0 ? 'g' : undefined} label={`${pr.key} ${pr.title}`} onPress={() => openGithub($, pr.key)}>
+                      <Text wrap="truncate-end"><Text color="success" underline>{pr.key}</Text> {pr.title}</Text>
+                    </Button>
+                  ) : (
+                    <Link key={`pr-${pr.key}`} href={pr.url} label={`${pr.key} ${pr.title}`} />
+                  ),
+                )}
+              </Box>
+            ))}
           </Box>
           {noticeRow}
           {v.picking ? (
@@ -848,6 +989,7 @@ export const register: Register = on => {
             <>
               <Box flexDirection="row" gap={1} flexWrap="wrap">
                 {pill({ id: 'start', hotkey: 's', label: 'start in cloud', color: 'claude', onPress: () => d && start($, key, d) })}
+                {pill({ id: 'worktree', hotkey: 'w', label: 'worktree', color: 'claude', onPress: () => worktree($, key, i) })}
                 {pill({ id: 'status', hotkey: 'c', label: 'status', color: 'warning', onPress: () => pickStatus($, key, i) })}
                 {i.branch && pill({ id: 'branch', hotkey: 'y', label: 'copy branch', color: 'suggestion', onPress: p => copy($, i.branch!, p.surface, 'The branch') })}
                 <Link href={i.url} label="open in Linear" />

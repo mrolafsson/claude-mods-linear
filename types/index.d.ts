@@ -25,6 +25,8 @@ export type Detail = Issue & {
   labels: { name: string; color: string | null }[]
   cycle: string | null
   dueDate: string | null
+  // Its GitHub pull requests, from its attachments: owner/repo#n.
+  prs: { key: string; title: string; url: string }[]
 }
 
 export type Status = { id: string; name: string; type: string }
@@ -76,6 +78,8 @@ declare module 'claude-code' {
       projects: Shaped<Record<string, ProjectsLoaded>>
       scope: Shaped<Scope | null>
       notice: Shaped<Notice | null>
+      // The mod's command the pane was opened from, to go back to with Esc.
+      from: string | null
     }
   }
 }

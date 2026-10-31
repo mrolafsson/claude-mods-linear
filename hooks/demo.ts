@@ -101,6 +101,14 @@ const ISSUES: DemoIssue[] = [
   },
 ]
 
+// The demo issues with a pull request in the GitHub mod's demo org: their
+// branches are those PRs' branches, and the PRs are attached.
+const PULLS: Record<string, { branch: string; repo: string; number: number; title: string }> = {
+  'HAL-212': { branch: 'sam/hal-212-offline-conflicts', repo: 'halcyon/notes-app', number: 482, title: 'Offline edits survive a sync conflict' },
+  'HAL-231': { branch: 'sam/hal-231-search-accents', repo: 'halcyon/notes-app', number: 479, title: 'Search index drops accents' },
+  'HAL-240': { branch: 'jonas/hal-240-export-images', repo: 'halcyon/notes-app', number: 471, title: 'Markdown export keeps inline images' },
+}
+
 // Changes made in the demo, for this session: statuses and assignees.
 const changed: Record<string, { state?: string; mine?: boolean }> = {}
 
@@ -111,7 +119,7 @@ const issueNode = (i: DemoIssue) => {
   return {
     identifier: now.identifier,
     title: now.title,
-    branchName: `sam/${now.identifier.toLowerCase()}-${now.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}`,
+    branchName: PULLS[now.identifier]?.branch ?? `sam/${now.identifier.toLowerCase()}-${now.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)}`,
     url: `https://linear.app/halcyon/issue/${now.identifier}`,
     priority: now.priority,
     priorityLabel: ['No priority', 'Urgent', 'High', 'Medium', 'Low'][now.priority],
@@ -124,6 +132,11 @@ const issueNode = (i: DemoIssue) => {
     assignee: now.mine ? { displayName: 'Sam Rivera', isMe: true } : { displayName: 'Priya Nair', isMe: false },
     labels: { nodes: now.labels.map(([name, color]) => ({ name, color })) },
     cycle: { number: 14, name: 'Search polish' },
+    attachments: {
+      nodes: PULLS[now.identifier]
+        ? [{ url: `https://github.com/${PULLS[now.identifier]!.repo}/pull/${PULLS[now.identifier]!.number}`, title: PULLS[now.identifier]!.title }]
+        : [],
+    },
   }
 }
 

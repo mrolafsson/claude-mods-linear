@@ -15,11 +15,16 @@ Code cloud session, without leaving the conversation.
   in Linear's colour for it, priority, project, assignee, labels in their
   colours, cycle, due date, branch, and the description as Markdown.
 - **Change status** from the team's own workflow.
+- **Worktrees**: one key finds or makes a git worktree for the issue, on
+  Linear's branch name for it, beside your checkout.
 - **Start** an issue: it's yours and In Progress, and a Claude Code cloud
   session takes it on, told to branch from `origin/main` and open a draft
   pull request.
 - **Projects**: by state, with progress, lead and target date; each opens on
   its own screen with its open issues.
+- **Works with [claude-mods-github](https://github.com/mrolafsson/claude-mods-github)**:
+  an issue's pull requests open in the GitHub pane, a PR's issue opens here,
+  and Esc comes back.
 - **Several workspaces**, one sign-in each, switched with a press.
 - **Try it without an account**: `/linear demo` is a made-up workspace.
 - **As big as the layout allows**, and in Claude Code's theme colours.
@@ -31,7 +36,8 @@ plugin it takes its look from: they share no code.
 
 **Contents:** [Requirements](#requirements) · [Install](#install) ·
 [Try it without an account](#try-it-without-an-account) · [Sign in](#sign-in) ·
-[Use](#use) · [Start](#start) · [Where it opens](#where-it-opens) ·
+[Use](#use) · [Start](#start) · [Worktrees](#worktrees) ·
+[With the GitHub mod](#with-the-github-mod) · [Where it opens](#where-it-opens) ·
 [Privacy and security](#privacy-and-security) · [Uninstall](#uninstall) ·
 [Development](#development) · [License](#license)
 
@@ -104,9 +110,12 @@ and follows you through it, saying how many more are above and below.
 ![An issue](docs/images/issue.png)
 
 Its status in Linear's colour for it, then everything Linear knows about it:
-project, assignee, labels, cycle, due date and branch, then the description.
-The letters act: **s** starts it, **c** changes its status, **y** copies its
-branch, **b** goes back (as does Esc). **open in Linear** is a link.
+project, assignee, labels, cycle, due date, branch and its pull requests,
+then the description. The screen is taller than the pane, so the arrows
+scroll it, and the letters act: **s** starts it in the cloud, **w** makes its
+worktree, **c** changes its status, **y** copies its branch, **g** opens its
+pull request (with the GitHub mod), **b** goes back (as does Esc). **open in
+Linear** is a link.
 
 ### Changing status
 
@@ -139,7 +148,7 @@ Esc goes back a step at a time: the issue, the project, the projects.
 | ↓ | from the filter into the list |
 | ↑ ↓, Enter | through the list; open the issue or project |
 | ↑ from the filter | switch between Issues and Projects |
-| s, c, y, b | on an issue: start, status, copy branch, back |
+| s, w, c, y, g, b | on an issue: start in cloud, worktree, status, copy branch, its PR, back |
 | 1–9 | on the status list: that status |
 | Esc | clear the filter; back from an issue or a project; close |
 
@@ -164,6 +173,38 @@ takes your local branch with it, which is why the session is told to start
 from `origin/main`. Cloud sessions push `claude/…` branches, whatever name
 they're given; the pull request's description links it to the issue.
 
+## Worktrees
+
+**w** on an issue is the local way to work on it, as Start is the cloud way.
+It finds the issue's worktree, or makes one, in the repository the Claude
+session is in:
+
+- **Which branch.** Linear's own branch name for the issue (*Copy git branch
+  name* in Linear), so Linear's GitHub integration links the pull request.
+- **Where.** Beside the checkout, at `<repo>.worktrees/<branch>`. One already
+  on the branch, anywhere in the repo's worktrees, is used as it is.
+- **From what.** A branch that already exists locally is checked out as it
+  is; a new one starts from the remote's default branch (`origin/main`, say),
+  fetched first.
+
+The pane shows the path and the `cd … && claude` that starts a session there.
+It starts nothing itself.
+
+## With the GitHub mod
+
+With [claude-mods-github](https://github.com/mrolafsson/claude-mods-github)
+installed too, the two find each other, with nothing to configure:
+
+- An issue's screen lists its **pull requests**, from Linear's own links to
+  GitHub. **g** (or a click) opens one in the GitHub pane.
+- A PR's screen there names its Linear issue; **l** opens it here, with
+  **GitHub ›** in its crumb.
+- **Esc** in the pane you went to comes back to the one you came from, as you
+  left it.
+
+Without the GitHub mod, an issue's pull requests are links to GitHub.
+`/linear issue HAL-212` opens an issue straight away, as the GitHub mod does.
+
 ## Where it opens
 
 Claude Code decides where a pane goes, by your renderer:
@@ -182,9 +223,10 @@ The pane asks for all the room it can get, and a size you drag it to wins.
 - The tokens are kept in Claude Code's plugin store on that computer
   (`~/.claude/plugins/store/`), a file only you can read, and refreshed when
   they expire. **sign out** forgets a workspace's.
-- The pane talks to `api.linear.app` and `linear.app` alone. It runs one
-  program: `claude --cloud` (through `script`, which gives it the terminal it
-  needs), and only when you press **start in cloud**.
+- The pane talks to `api.linear.app` and `linear.app` alone. It runs
+  `claude --cloud` (through `script`, which gives it the terminal it needs)
+  only when you press **start in cloud**, and `git` only when you press
+  **worktree**.
 - The demo contacts nothing and runs nothing.
 
 ## Uninstall

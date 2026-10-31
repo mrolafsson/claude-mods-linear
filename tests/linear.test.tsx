@@ -87,6 +87,8 @@ function fakeLinear(on: any, store: Map<string, unknown>, issues: unknown[] = IS
 
 function engine(on: any) {
   on('command.register', () => ({ value: { command: 'linear' } }))
+  // The clock: no waiting in a test.
+  on('clock.sleep', () => ({ value: undefined }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.toast', () => ({ value: undefined }))
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
@@ -350,4 +352,66 @@ test('/linear demo: Halcyon, with no account, no network and no cloud session', 
   await ui.unmount()
   expect(fetched).toEqual([])
   expect(ran).toEqual([])
+})
+
+test('with the GitHub mod: /linear issue opens the issue, its PRs open there, Esc goes back', async ($, on) => {
+  engine(on)
+  on('store.get', () => ({ value: undefined }))
+  on('store.set', () => ({ value: undefined }))
+  on('ui.focus', () => ({}))
+  on('ui.close', () => ({ value: undefined }))
+  on('command.list', () => ({ value: [{ name: 'linear', description: '' }, { name: 'github', description: '' }] as any }))
+  const github: string[] = []
+  on('command.run', { command: 'github' }, (_: unknown, e: any) => {
+    github.push(e.args)
+    return { text: '' }
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await ($.command.run as any)({ command: 'linear', args: 'demo issue HAL-231 from:github' })
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: 'GitHub ›' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /sam\/hal-231-search-accents/ })).toBeDefined()
+  await ui.press({ key: 'pr-halcyon/notes-app#479' })
+  await settle()
+  expect(github[0]).toBe('demo pr halcyon/notes-app#479 from:linear')
+
+  // Back, as Esc does: to the GitHub pane, as it was left.
+  await ui.press({ key: 'back' })
+  await settle()
+  expect(github[1]).toBe('back')
+  await ui.unmount()
+})
+
+test('w: the issue\'s worktree beside the checkout, on Linear\'s branch, from the default branch', async ($, on) => {
+  const store = new Map<string, unknown>([
+    ['workspaces', [{ key: 'halcyon', name: 'Halcyon' }]],
+    ['account:halcyon', { key: 'halcyon', name: 'Halcyon', access: 'tok-1', refresh: null, expiresAt: Date.now() + 3_600_000 }],
+  ])
+  engine(on)
+  fakeLinear(on, store)
+  on('ui.focus', () => ({}))
+  const ran: string[][] = []
+  on('process.run', (_: unknown, e: any) => {
+    const argv: string[] = [...e.argv]
+    ran.push(argv)
+    const ok = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } as any })
+    if (argv.includes('--git-common-dir')) return ok('/repo/.git\n')
+    if (argv.includes('list')) return ok('worktree /repo\nHEAD abc\nbranch refs/heads/main\n')
+    if (argv.includes('--verify')) return ok('', 1)
+    if (argv.includes('symbolic-ref')) return ok('origin/main\n')
+    return ok('')
+  })
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await ($.command.run as any)({ command: 'linear', args: '' })
+  await settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'issue-HAL-231' })
+  await settle()
+  await ui.press({ key: 'worktree' })
+  await settle()
+  expect(ran.find(a => a.includes('add'))).toEqual(['git', 'worktree', 'add', '--no-track', '-b', 'sam/hal-231', '/repo.worktrees/sam-hal-231', 'origin/main'])
+  expect(await ui.find({ type: 'Text', text: /HAL-231's worktree is at \/repo\.worktrees\/sam-hal-231/ })).toBeDefined()
+  await ui.unmount()
 })
