@@ -645,11 +645,11 @@ export const register: Register = on => {
         await switchTab($, element === 'tab-issues' ? 'issues' : 'projects')
         return { deny: 'The cursor stays in the filter; the tab changed.' }
       }
-      // The filter sits between two gates: a move off it lands on the one
-      // before (↑) or the one after (↓), whatever order the surface walks
-      // the rest in. Anything else (a click, say) moves nothing.
-      if (element !== 'gate-up' && element !== 'gate-down') return { deny: 'The cursor stays in the filter.' }
-      const down = element === 'gate-down'
+      // The arrows move to the element above or below on screen, so a move
+      // off the filter onto anything drawn below it (a row, a notice's
+      // buttons) is ↓, and onto anything above it (the tabs, the workspaces,
+      // a project's crumb) is ↑.
+      const down = Boolean(element && (element.startsWith('issue-') || element.startsWith('project-') || element === 'copy-link' || element === 'dismiss'))
       const count = rowsOf(await currentLines($)).length
       const sel = await read($, selected)
       // Above the first row is the tab bar: -1 with the open tab chosen, -2
@@ -970,9 +970,6 @@ export const register: Register = on => {
         </Box>
         )}
         {Input && (
-          <Box flexDirection="row" gap={1}>
-          <Button key="gate-up" plain dimColor label="›" onPress={() => undefined} />
-          <Box flexGrow={1}>
           <Input
             key="filter"
             autoFocus
@@ -987,9 +984,6 @@ export const register: Register = on => {
             }}
             onSubmit={() => (onBar ? (chosen === which ? update($, selected, () => 0) : switchTab($, chosen)) : open(picked))}
           />
-          </Box>
-          <Button key="gate-down" plain dimColor label="↓" onPress={() => undefined} />
-          </Box>
         )}
         {noticeRow}
         {error && <Text color="error" wrap="wrap">{error}</Text>}
