@@ -956,7 +956,10 @@ export const register: Register = on => {
           <Input
             key="filter"
             autoFocus
-            placeholder={hint}
+            // Short, so the field never wraps and moves the list as it takes
+            // the keyboard: the Enter hint a glyph, the hint itself when wide.
+            submitLabel="↵"
+            placeholder={width >= 70 ? hint : 'Filter…'}
             value={f}
             onInput={async text => {
               await update($, filter, () => text)
