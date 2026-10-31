@@ -213,7 +213,7 @@ test('↑/↓ move a highlight through a long list, the cursor staying in the fi
       const ui = await $.ui.mount({ ...short, surface: 'terminal' })
       const first = await ui.find({ type: 'Button', text: /HAL-30\d\d/ })
       await ui.unmount()
-      const r = await $.ui.focus({ requestId: 'linear', key: down ? first!.key! : 'issue-HAL-3039' } as any)
+      const r = await $.ui.focus({ requestId: 'linear', key: down ? 'gate-down' : 'gate-up' } as any)
       expect((r as any).deny).toContain('stays in the filter')
       await settle()
     }
@@ -259,7 +259,7 @@ test('the tab bar: ↑ from the first row reaches it, ↑ again chooses Projects
   await ($.command.run as any)({ command: 'linear', args: '' })
   await settle()
   const up = async () => {
-    await $.ui.focus({ requestId: 'linear', key: 'signout' } as any)
+    await $.ui.focus({ requestId: 'linear', key: 'gate-up' } as any)
     await settle()
   }
 
