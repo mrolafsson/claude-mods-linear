@@ -26,7 +26,7 @@ export type Detail = Issue & {
   cycle: string | null
   dueDate: string | null
   // Its GitHub pull requests, from its attachments: owner/repo#n.
-  prs: { key: string; title: string; url: string }[]
+  prs: { key: string; title: string; url: string; state: string }[]
 }
 
 export type Status = { id: string; name: string; type: string }

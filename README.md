@@ -113,8 +113,9 @@ Its status in Linear's colour for it, then everything Linear knows about it:
 project, assignee, labels, cycle, due date, branch and its pull requests,
 then the description. The screen is taller than the pane, so the arrows
 scroll it, and the letters act: **s** starts it in the cloud, **w** makes its
-worktree, **c** changes its status, **y** copies its branch, **g** opens its
-pull request (with the GitHub mod), **b** goes back (as does Esc). **open in
+worktree, **c** changes its status, **y** copies its link, **b** copies its
+branch, **g** opens its pull request (with the GitHub mod). Esc (or **back**)
+goes back. **open in
 Linear** is a link.
 
 ### Changing status
@@ -148,7 +149,7 @@ Esc goes back a step at a time: the issue, the project, the projects.
 | ↓ | from the filter into the list |
 | ↑ ↓, Enter | through the list; open the issue or project |
 | ↑ from the filter | switch between Issues and Projects |
-| s, w, c, y, g, b | on an issue: start in cloud, worktree, status, copy branch, its PR, back |
+| s, w, c, y, b, g | on an issue: start in cloud, worktree, status, copy its link, copy its branch, its PR |
 | 1–9 | on the status list: that status |
 | Esc | clear the filter; back from an issue or a project; close |
 

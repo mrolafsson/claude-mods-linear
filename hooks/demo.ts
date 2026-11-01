@@ -133,9 +133,15 @@ const issueNode = (i: DemoIssue) => {
     labels: { nodes: now.labels.map(([name, color]) => ({ name, color })) },
     cycle: { number: 14, name: 'Search polish' },
     attachments: {
-      nodes: PULLS[now.identifier]
-        ? [{ url: `https://github.com/${PULLS[now.identifier]!.repo}/pull/${PULLS[now.identifier]!.number}`, title: PULLS[now.identifier]!.title }]
-        : [],
+      nodes: [
+        // An earlier try at HAL-212, closed: shown after the open one, dimmed.
+        ...(now.identifier === 'HAL-212'
+          ? [{ url: 'https://github.com/halcyon/notes-app/pull/466', title: 'Last-write-wins for offline edits', metadata: { status: 'closed', draft: false } }]
+          : []),
+        ...(PULLS[now.identifier]
+          ? [{ url: `https://github.com/${PULLS[now.identifier]!.repo}/pull/${PULLS[now.identifier]!.number}`, title: PULLS[now.identifier]!.title, metadata: { status: 'open', draft: false } }]
+          : []),
+      ],
     },
   }
 }

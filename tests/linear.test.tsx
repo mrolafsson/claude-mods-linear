@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { titleArgs } from '../hooks/register'
+import { prState, titleArgs } from '../hooks/register'
 
 const PANE = {
   plugin: 'linear',
@@ -415,4 +415,12 @@ test('w: the issue\'s worktree beside the checkout, on Linear\'s branch, from th
 test('opened by the GitHub mod: its arguments are read from the title', () => {
   expect(titleArgs('Linear ⟨demo issue HAL-231 from:github⟩')).toBe('demo issue HAL-231 from:github')
   expect(titleArgs('Linear')).toBe(null)
+})
+
+test('a PR\'s state from what Linear keeps of it', () => {
+  expect(prState({ status: 'open', draft: false })).toBe('open')
+  expect(prState({ status: 'open', draft: true })).toBe('draft')
+  expect(prState({ status: 'closed', mergedAt: null })).toBe('closed')
+  expect(prState({ status: 'merged', mergedAt: '2026-10-31T10:00:00Z' })).toBe('merged')
+  expect(prState(undefined)).toBe('open')
 })

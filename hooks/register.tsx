@@ -105,6 +105,21 @@ const from = atom({ plugin: 'linear', key: 'from' } as const, null as string | n
 // Whether the GitHub mod is installed, for an issue's pull requests.
 let hasGithub = false
 
+// A PR's state from what Linear keeps of it: open, draft, merged, closed.
+const PR_ORDER = ['open', 'draft', 'merged', 'closed']
+export function prState(m: any): string {
+  const s = String(m?.status ?? 'open').toLowerCase()
+  if (s === 'merged' || m?.mergedAt) return 'merged'
+  if (s === 'closed') return 'closed'
+  return m?.draft || s === 'draft' ? 'draft' : 'open'
+}
+const PR_LOOK: Record<string, { mark: string; color: string }> = {
+  open: { mark: '●', color: 'success' },
+  draft: { mark: '◌', color: 'subtle' },
+  merged: { mark: '⇄', color: 'merged' },
+  closed: { mark: '✗', color: 'error' },
+}
+
 // owner/repo#n from a pull request's address on GitHub, or null.
 export function pullKey(url: string): string | null {
   const m = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(url)
@@ -350,7 +365,7 @@ async function openIssue($: EngineInterface, key: string, id: string) {
     const d = await gql(
       $,
       key,
-      `query($id: String!) { issue(id: $id) { ${FIELDS} description dueDate priorityLabel state { color } assignee { displayName isMe } labels { nodes { name color } } cycle { number name } attachments { nodes { url title } } } }`,
+      `query($id: String!) { issue(id: $id) { ${FIELDS} description dueDate priorityLabel state { color } assignee { displayName isMe } labels { nodes { name color } } cycle { number name } attachments { nodes { url title metadata } } } }`,
       { id },
     )
     const i = d.issue
@@ -363,10 +378,14 @@ async function openIssue($: EngineInterface, key: string, id: string) {
       labels: (i.labels?.nodes ?? []).map((l: any) => ({ name: String(l.name), color: l.color ?? null })),
       cycle: i.cycle ? `Cycle ${i.cycle.number}${i.cycle.name ? ` · ${i.cycle.name}` : ''}` : null,
       dueDate: i.dueDate ?? null,
-      prs: (i.attachments?.nodes ?? []).flatMap((a: any) => {
-        const k = pullKey(String(a.url ?? ''))
-        return k ? [{ key: k, title: String(a.title ?? k), url: String(a.url) }] : []
-      }),
+      // Its PRs, open ones first, each in the state Linear's GitHub
+      // integration last saw: open, draft, merged or closed.
+      prs: (i.attachments?.nodes ?? [])
+        .flatMap((a: any) => {
+          const k = pullKey(String(a.url ?? ''))
+          return k ? [{ key: k, title: String(a.title ?? k), url: String(a.url), state: prState(a.metadata) }] : []
+        })
+        .sort((a: { state: string }, b: { state: string }) => PR_ORDER.indexOf(a.state) - PR_ORDER.indexOf(b.state)),
     }
     await update($, details, all => ({ ...all, [id]: detail }))
   } catch (err) {
@@ -946,7 +965,8 @@ export const register: Register = on => {
       // No element has the ring here: the screen is taller than the pane, so
       // the arrows scroll it, and the actions are their letters. (Nor is
       // Start, which makes a cloud session, ever one stray Enter away.)
-      const backButton = pill({ id: 'back', hotkey: 'b', label: 'back', color: 'subtle', onPress: async () => ((await goBackFrom($)) ? undefined : back($, v.id)) })
+      // Back by Esc or a click: b copies the branch, as in the GitHub pane.
+      const backButton = pill({ id: 'back', label: 'back', color: 'subtle', onPress: async () => ((await goBackFrom($)) ? undefined : back($, v.id)) })
       if (!i) return <Box flexDirection="column">{backButton}<Text dimColor>Loading {v.id}…</Text></Box>
       const s = look(i.statusType, i.status)
       // Laid out as herdr-linear's issue screen: the status as a pill in
@@ -1008,15 +1028,27 @@ export const register: Register = on => {
             {i.branch && field('Branch', <Text color="planMode" wrap="truncate-end">{i.branch}</Text>)}
             {d && d.prs.length > 0 && field('PRs', (
               <Box flexDirection="column">
-                {d.prs.map((pr, n) =>
-                  hasGithub ? (
+                {d.prs.map((pr, n) => {
+                  // Merged and closed ones dimmed; g goes to the first (an open one, if any).
+                  const look = PR_LOOK[pr.state] ?? PR_LOOK.open!
+                  const isDone = pr.state === 'merged' || pr.state === 'closed'
+                  return hasGithub ? (
                     <Button key={`pr-${pr.key}`} plain hotkey={n === 0 ? 'g' : undefined} label={`${pr.key} ${pr.title}`} onPress={() => openGithub($, pr.key)}>
-                      <Text wrap="truncate-end"><Text color="success" underline>{pr.key}</Text> {pr.title}</Text>
+                      <Text wrap="truncate-end">
+                        <Text color={look.color}>{look.mark} </Text>
+                        <Text color={isDone ? undefined : 'success'} dimColor={isDone || undefined} underline>{pr.key}</Text>
+                        <Text dimColor={isDone || undefined}> {pr.title}</Text>
+                        <Text color={look.color} dimColor={isDone || undefined}> · {pr.state}</Text>
+                      </Text>
                     </Button>
                   ) : (
-                    <Link key={`pr-${pr.key}`} href={pr.url} label={`${pr.key} ${pr.title}`} />
-                  ),
-                )}
+                    <Box key={`pr-${pr.key}`} flexDirection="row">
+                      <Text color={look.color}>{look.mark} </Text>
+                      <Link href={pr.url} label={`${pr.key} ${pr.title}`} />
+                      <Text color={look.color} dimColor={isDone || undefined}> · {pr.state}</Text>
+                    </Box>
+                  )
+                })}
               </Box>
             ))}
           </Box>
@@ -1043,7 +1075,9 @@ export const register: Register = on => {
                 {pill({ id: 'start', hotkey: 's', label: 'start in cloud', color: 'claude', onPress: () => d && start($, key, d) })}
                 {pill({ id: 'worktree', hotkey: 'w', label: 'worktree', color: 'claude', onPress: () => worktree($, key, i) })}
                 {pill({ id: 'status', hotkey: 'c', label: 'status', color: 'warning', onPress: () => pickStatus($, key, i) })}
-                {i.branch && pill({ id: 'branch', hotkey: 'y', label: 'copy branch', color: 'suggestion', onPress: p => copy($, i.branch!, p.surface, 'The branch') })}
+                {pill({ id: 'copy-url', hotkey: 'y', label: 'copy link', color: 'suggestion', onPress: p => copy($, i.url, p.surface, 'The link') })}
+                {i.branch && pill({ id: 'branch', hotkey: 'b', label: 'copy branch', color: 'suggestion', onPress: p => copy($, i.branch!, p.surface, 'The branch') })}
+                {/* A terminal that can't open links (or wraps a long one) has the copy. */}
                 <Link href={i.url} label="open in Linear" />
               </Box>
               <Text dimColor wrap="wrap">
@@ -1123,7 +1157,7 @@ export const register: Register = on => {
           // name; then its state as a pill in its colour, and the rest.
           <Box flexDirection="column">
             <Box flexDirection="row" gap={1}>
-              {pill({ id: 'crumb-projects', hotkey: 'b', label: 'back', color: 'subtle', onPress: () => leaveProject($) })}
+              {pill({ id: 'crumb-projects', label: 'back', color: 'subtle', onPress: () => leaveProject($) })}
               <Text dimColor>Projects ›</Text>
               <Text weight="bold" wrap="truncate-end">{sc.name}</Text>
               <Text dimColor>{isLoading ? ' loading…' : ''}</Text>
@@ -1135,6 +1169,7 @@ export const register: Register = on => {
                 </Text>
                 <Text dimColor>· {Math.round(project.progress * 100)}%{project.lead ? ` · ${project.lead}` : ''}{project.targetDate ? ` · due ${project.targetDate}` : ''} ·</Text>
                 <Link href={project.url} label="open in Linear" />
+                <Button key="copy-project-url" plain hotkey="y" label="copy link" onPress={p => copy($, project.url, p.surface, 'The link')} />
               </Box>
             )}
           </Box>
