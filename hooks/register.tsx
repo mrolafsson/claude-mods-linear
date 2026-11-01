@@ -854,6 +854,8 @@ export const register: Register = on => {
     const { Box, Text, Button, Markdown, Link } = table
     // The phone has no text field: no filter or pasting there.
     const Input = 'Input' in table ? table.Input : null
+    // The surface's own animated regions, where it has them.
+    const Client = 'Client' in table ? (table as any).Client : null
     const v = await read($, view)
     const key = await read($, workspace)
     const spaces = await read($, workspaces)
@@ -973,14 +975,18 @@ export const register: Register = on => {
             <Text dimColor>{crumb}</Text>
             <Text weight="bold">{i.id}</Text>
           </Box>
-          <Box flexDirection="row" gap={1}>
-            <Text backgroundColor={stateColor} color="inverseText" weight="semibold">{` ${i.status} `}</Text>
-            {i.priority === 1 && <Text dimColor>·</Text>}
-            {i.priority === 1 && <Text color="error" weight="semibold">! Urgent</Text>}
-            {priority && <Text dimColor>·</Text>}
-            {priority && <Text>{priority}</Text>}
+          {/* The issue, framed in its status's colour, as Linear colours it. */}
+          <Box flexDirection="column" borderStyle="round" borderColor={stateColor} paddingX={1}>
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text wrap="truncate-end">
+              <Text color={stateColor} weight="bold">{i.id}</Text>
+              {i.priority === 1 && <Text color="error" weight="bold"> · ! urgent</Text>}
+              {priority && <Text dimColor> · {priority.toLowerCase()}</Text>}
+            </Text>
+            <Box flexShrink={0}><Text color={stateColor}>{s.mark} {i.status}</Text></Box>
           </Box>
           <Text weight="bold" wrap="wrap">{i.title}</Text>
+          <Text> </Text>
           <Box flexDirection="column">
             {field('Project', i.project)}
             {d && field('Assignee', d.assignee ? (
@@ -1014,10 +1020,11 @@ export const register: Register = on => {
               </Box>
             ))}
           </Box>
+          </Box>
           {noticeRow}
           {v.picking ? (
-            <Box flexDirection="column">
-              <Text dimColor>Move {i.id} to:</Text>
+            <Box flexDirection="column" borderStyle="round" borderColor="warning" paddingX={1}>
+              <Text color="warning" weight="bold">STATUS <Text dimColor>· move {i.id} to</Text></Text>
               {!options && <Text dimColor>Loading statuses…</Text>}
               {options?.map((st, n) => {
                 const k = look(st.type, st.name)
@@ -1044,8 +1051,10 @@ export const register: Register = on => {
               </Text>
             </>
           )}
-          <Text dimColor>{'─'.repeat(Math.max(10, Math.min(width - 2, 72)))}</Text>
-          {d ? (d.description.trim() ? <Markdown key={`md-${i.id}`} text={tidy(d.description)} /> : <Text dimColor>No description.</Text>) : <Text dimColor>Loading…</Text>}
+          <Box flexDirection="column" borderStyle="round" borderColor="subtle" paddingX={1}>
+            <Text color="suggestion" weight="bold">DESCRIPTION</Text>
+            {d ? (d.description.trim() ? <Markdown key={`md-${i.id}`} text={tidy(d.description)} /> : <Text dimColor>No description.</Text>) : <Text dimColor>Loading…</Text>}
+          </Box>
         </Box>
       )
     }
@@ -1069,7 +1078,7 @@ export const register: Register = on => {
     // The header, the filter, the gaps and the workspaces' row take about
     // 12 lines;
     // a note or an error two more, a project's header one.
-    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 12 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
+    room = Math.max(5, (e.props.scroll?.bodyRows ?? 24) - 13 - (note ? 2 : 0) - (error ? 2 : 0) - (sc ? 1 : 0))
     // Centred on the keyboard's row, so a held arrow finds rows drawn ahead.
     const selLine = rows[sel] ? listed.indexOf(rows[sel]!) : 0
     const t = Math.max(0, Math.min(selLine - Math.floor(room / 2), listed.length - room))
@@ -1136,6 +1145,8 @@ export const register: Register = on => {
             <Text dimColor>{isLoading ? ' loading…' : ' '}</Text>
           </Box>
         )}
+        {/* Under the tabs, a rule that runs while Linear is being asked. */}
+        {Client && <Client key="list-rail" module="./rail.tsx" props={{ active: isLoading, color: 'suggestion', width }} />}
         {Input && (
           <Input
             key="filter"
@@ -1174,11 +1185,14 @@ export const register: Register = on => {
                 const p = l.project
                 const s = look(p.state === 'planned' ? 'unstarted' : p.state, p.state)
                 const extra = [`${Math.round(p.progress * 100)}%`, p.lead, p.targetDate].filter(Boolean).join(' · ')
+                // Its progress as a gauge, in its state's colour.
+                const filled = Math.round(p.progress * 6)
                 return (
                   <Button key={rowKey(l)} plain onPress={() => openProject($, key, p)}>
                     <Text color={s.color}>{s.mark}</Text>
-                    <Text> {cut(p.name, Math.max(12, width - extra.length - 6))}</Text>
-                    <Text dimColor> {extra}</Text>
+                    <Text> {cut(p.name, Math.max(12, width - extra.length - 14))} </Text>
+                    <Text color={s.color}>{'▰'.repeat(filled)}</Text>
+                    <Text dimColor>{'▱'.repeat(6 - filled)} {extra}</Text>
                   </Button>
                 )
               }

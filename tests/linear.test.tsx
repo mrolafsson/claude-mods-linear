@@ -162,8 +162,8 @@ test('the list by status, an issue, and Start in the cloud', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /sam\/hal-231/ })).toBeDefined()
   // Laid out as herdr-linear's: the status a pill in Linear's colour, the
   // fields with who's you, the labels' own colours, the cycle, the description.
-  expect(((await ui.find({ type: 'Text', text: ' In Progress ' })) as any)?.props?.backgroundColor).toBe('#f2c94c')
-  expect(await ui.find({ type: 'Text', text: '! Urgent' })).toBeDefined()
+  expect(((await ui.find({ type: 'Text', text: '◔ In Progress' })) as any)?.props?.color).toBe('#f2c94c')
+  expect(await ui.find({ type: 'Text', text: ' · ! urgent' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: / \(you\)/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Cycle 14 · Search polish/ })).toBeDefined()
   const dots = (await ui.findAll({ type: 'Text', text: '●' })) as any[]
